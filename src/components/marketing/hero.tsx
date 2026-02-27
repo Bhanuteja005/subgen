@@ -164,25 +164,39 @@ const Hero = () => {
         setProcessingStep("uploading"); setUploadProgress(0);
 
         try {
-            // 1. Upload to server — stream raw binary body to avoid FormData 413 limits
-            const res = await fetch("/api/upload", {
+            // 1a. Get a presigned PUT URL from our backend (tiny JSON request — no file → no 413)
+            const urlRes = await fetch("/api/presigned-url", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/octet-stream",
-                    "X-File-Name": encodeURIComponent(selectedFile.name),
-                    "X-File-Type": selectedFile.type || "video/mp4",
-                    "X-File-Size": String(selectedFile.size),
-                },
-                body: selectedFile,
-                // @ts-expect-error — duplex is required for streaming request bodies
-                duplex: "half",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    filename: selectedFile.name,
+                    contentType: selectedFile.type || "video/mp4",
+                }),
             });
-            if (!res.ok) {
-                let errMsg = "Upload failed";
-                try { errMsg = (await res.json()).error ?? errMsg; } catch { errMsg = `Upload failed (${res.status})`; }
+            if (!urlRes.ok) {
+                let errMsg = "Could not get upload URL";
+                try { errMsg = (await urlRes.json()).error ?? errMsg; } catch { errMsg = `Presign failed (${urlRes.status})`; }
                 throw new Error(errMsg);
             }
-            const { key } = await res.json();
+            const { uploadUrl, key } = await urlRes.json();
+
+            // 1b. Upload the file directly to R2 via XHR (browser → R2, bypasses Vercel entirely — no size limit)
+            await new Promise<void>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+                };
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 300) resolve();
+                    else reject(new Error(`Upload to storage failed (${xhr.status})`));
+                };
+                xhr.onerror = () => reject(new Error("Upload network error — please check your connection"));
+                xhr.ontimeout = () => reject(new Error("Upload timed out — file may be too large or connection too slow"));
+                xhr.open("PUT", uploadUrl);
+                xhr.setRequestHeader("Content-Type", selectedFile.type || "video/mp4");
+                xhr.send(selectedFile);
+            });
+
             setVideoKey(key);
             setUploadProgress(100);
 
