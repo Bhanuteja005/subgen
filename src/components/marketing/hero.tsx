@@ -226,26 +226,57 @@ const Hero = () => {
                 try { errMsg = (await urlRes.json()).error ?? errMsg; } catch { errMsg = `Presign failed (${urlRes.status})`; }
                 throw new Error(errMsg);
             }
-            const { uploadUrl, key } = await urlRes.json();
+            const { uploadUrl, key: presignedKey } = await urlRes.json();
 
-            // 1b. Upload the file directly to R2 via XHR (browser → R2, bypasses Vercel entirely — no size limit)
-            await new Promise<void>((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
-                };
-                xhr.onload = () => {
-                    if (xhr.status >= 200 && xhr.status < 300) resolve();
-                    else reject(new Error(`Upload to storage failed (${xhr.status})`));
-                };
-                xhr.onerror = () => reject(new Error("Upload network error — please check your connection"));
-                xhr.ontimeout = () => reject(new Error("Upload timed out — file may be too large or connection too slow"));
-                xhr.open("PUT", uploadUrl);
-                xhr.setRequestHeader("Content-Type", selectedFile.type || "video/mp4");
-                xhr.send(selectedFile);
-            });
+            // 1b. Try direct XHR upload to R2 (browser → R2, no Vercel overhead).
+            //     If CORS isn't configured on the R2 bucket the XHR fires onerror.
+            //     In that case we automatically fall back to the server-side upload
+            //     route which proxies through Vercel (no CORS needed, ~4.5 MB limit).
+            let finalKey = presignedKey;
+            let xhrCorsBlocked = false;
+            try {
+                await new Promise<void>((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.upload.onprogress = (e) => {
+                        if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100));
+                    };
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) resolve();
+                        else reject(new Error(`Upload to storage failed (${xhr.status})`));
+                    };
+                    // onerror fires for network failures AND CORS-blocked requests
+                    xhr.onerror = () => { xhrCorsBlocked = true; reject(new Error("__CORS__")); };
+                    xhr.ontimeout = () => reject(new Error("Upload timed out — file may be too large or connection too slow"));
+                    xhr.open("PUT", uploadUrl);
+                    xhr.setRequestHeader("Content-Type", selectedFile.type || "video/mp4");
+                    xhr.send(selectedFile);
+                });
+            } catch (xhrErr) {
+                if (!xhrCorsBlocked) throw xhrErr; // real network error — surface it
 
-            setVideoKey(key);
+                // CORS blocked → fall back to server-side upload via Next.js API route
+                console.warn("[upload] XHR blocked (likely CORS). Falling back to server-side upload.");
+                setUploadProgress(0);
+                const fallbackRes = await fetch("/api/upload", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": selectedFile.type || "video/mp4",
+                        "x-file-type": selectedFile.type || "video/mp4",
+                        "x-file-name": encodeURIComponent(selectedFile.name),
+                        "x-file-size": String(selectedFile.size),
+                    },
+                    body: selectedFile,
+                });
+                if (!fallbackRes.ok) {
+                    let fbErr = "Server upload failed";
+                    try { fbErr = (await fallbackRes.json()).error ?? fbErr; } catch { fbErr = `Server upload failed (${fallbackRes.status})`; }
+                    throw new Error(fbErr);
+                }
+                const fbData = await fallbackRes.json();
+                finalKey = fbData.key;
+            }
+
+            setVideoKey(finalKey);
             setUploadProgress(100);
 
             // 2. Process on server
@@ -253,7 +284,7 @@ const Hero = () => {
             const pRes = await fetch("/api/process", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ key }),
+                body: JSON.stringify({ key: finalKey }),
             });
             setProcessingStep("transcribing");
             if (!pRes.ok) {

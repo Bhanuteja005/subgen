@@ -8,6 +8,7 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 
+export const runtime = "nodejs";
 // Allow up to 5 minutes for processing
 export const maxDuration = 300;
 
@@ -27,11 +28,28 @@ export async function POST(request: NextRequest) {
 
         // Step 1: Download video from R2 to a temp file
         console.log("Downloading video from R2...");
-        const objectStream = await getObjectStream(key);
+        let objectStream: Awaited<ReturnType<typeof getObjectStream>>;
+        try {
+            objectStream = await getObjectStream(key);
+        } catch (r2Err: unknown) {
+            const r2Msg = r2Err instanceof Error ? r2Err.message : String(r2Err);
+            const isNotFound =
+                r2Msg.includes("NoSuchKey") ||
+                r2Msg.includes("does not exist") ||
+                (r2Err as any)?.Code === "NoSuchKey";
+            return NextResponse.json(
+                {
+                    error: isNotFound
+                        ? "Video not found in storage — the upload may have failed. Please try uploading again."
+                        : `Storage error: ${r2Msg}`,
+                },
+                { status: isNotFound ? 404 : 502 }
+            );
+        }
 
         if (!objectStream) {
             return NextResponse.json(
-                { error: "Video not found in storage" },
+                { error: "Video not found in storage — please try uploading again." },
                 { status: 404 }
             );
         }
