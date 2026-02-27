@@ -71,3 +71,22 @@ export function cleanupTempFile(filePath: string): void {
         // Ignore cleanup errors
     }
 }
+
+/**
+ * Burn subtitles from an SRT file into a video and save as a new file.
+ * Returns the path to the output file.
+ */
+export async function burnSubtitles(videoPath: string, srtPath: string): Promise<string> {
+    const outputPath = path.join(os.tmpdir(), `captioned_${Date.now()}.mp4`).replace(/\\/g, "/");
+    const input = videoPath.replace(/\\/g, "/");
+    const subs = srtPath.replace(/\\/g, "/");
+
+    return new Promise((resolve, reject) => {
+        ffmpeg(input)
+            .outputOptions(["-c:v libx264", "-crf 18", "-preset veryfast", "-c:a copy"])
+            .videoFilters(`subtitles=${subs}`)
+            .on("end", () => resolve(outputPath))
+            .on("error", (err) => reject(new Error(`FFmpeg burn error: ${err.message}`)))
+            .save(outputPath);
+    });
+}

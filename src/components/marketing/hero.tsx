@@ -687,7 +687,7 @@ const Hero = () => {
                                             />
                                             {activeSubtitle && (
                                                 <div className="absolute bottom-12 left-0 right-0 flex justify-center px-6 pointer-events-none">
-                                                    <span className="bg-black/80 text-white text-sm md:text-base px-4 py-1.5 rounded-md text-center leading-snug max-w-[90%] shadow-lg">
+                                                    <span className="bg-black/80 text-white text-sm md:text-base px-4 py-1.5 rounded-md text-center leading-snug max-w-[90%] shadow-lg whitespace-normal break-words">
                                                         {activeSubtitle}
                                                     </span>
                                                 </div>
