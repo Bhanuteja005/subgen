@@ -88,63 +88,95 @@ export function cleanupTempFile(filePath: string): void {
 }
 
 /**
+ * Convert an SRT string to ASS format with embedded styles.
+ * This avoids relying on system fonts — libass uses its built-in fallback glyph.
+ */
+function srtToAss(srtContent: string): string {
+    // ASS sections
+    const header = `[Script Info]
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+// BorderStyle 1 = outline+shadow (works with built-in libass fallback font, no system font needed)
+Style: Default,Arial,28,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,2,10,10,55,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+
+    function toAssTime(srt: string): string {
+        // SRT: 00:00:01,000  →  ASS: 0:00:01.00
+        const [hms, ms] = srt.trim().split(",");
+        const [h, m, s] = hms.split(":");
+        const cs = Math.floor(Number(ms) / 10).toString().padStart(2, "0");
+        return `${Number(h)}:${m}:${s}.${cs}`;
+    }
+
+    const blocks = srtContent.trim().split(/\n\s*\n/);
+    const events = blocks.map((block) => {
+        const lines = block.trim().split("\n");
+        if (lines.length < 3) return "";
+        const timeLine = lines[1];
+        const [startRaw, endRaw] = timeLine.split(" --> ");
+        const text = lines.slice(2).join("\\N").replace(/[{}]/g, ""); // escape braces
+        const start = toAssTime(startRaw);
+        const end = toAssTime(endRaw);
+        return `Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`;
+    }).filter(Boolean);
+
+    return header + events.join("\n") + "\n";
+}
+
+/**
  * Burn subtitles from an SRT file into a video and save as a new file.
  * Returns the path to the output file.
  */
 export async function burnSubtitles(videoPath: string, srtPath: string): Promise<string> {
     ensureFfmpegConfigured();
-    // Use a short output filename with no special characters
     const id = Date.now();
     const outputPath = path.join(os.tmpdir(), `cap${id}.mp4`);
 
-    // Platform-aware escaping for the subtitles filter path argument.
-    // On Windows the drive-letter colon (C:) must be escaped as C\:
-    // On Linux/production (Vercel) the path is already safe — do NOT escape colons or it breaks.
-    let srtFilterPath: string;
+    // Convert SRT → ASS with embedded style so libass doesn't need system font files.
+    // This is the most reliable approach on serverless Linux environments.
+    const srtContent = fs.readFileSync(srtPath, "utf-8");
+    const assContent = srtToAss(srtContent);
+    const assPath = path.join(os.tmpdir(), `sub${id}.ass`);
+    fs.writeFileSync(assPath, assContent, "utf-8");
+    console.log("[ffmpeg] wrote ASS file:", assPath, "bytes:", assContent.length);
+
+    // Platform-aware path escaping for the `ass` filter
+    let assFilterPath: string;
     if (process.platform === "win32") {
-        srtFilterPath = srtPath
-            .replace(/\\/g, "/")          // backslash → forward slash
-            .replace(/^([A-Za-z]):/, "$1\\:"); // C: → C\:
+        assFilterPath = assPath.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "$1\\:");
     } else {
-        srtFilterPath = srtPath; // Linux: use path as-is
+        assFilterPath = assPath;
     }
-    // Escape any single quotes in the path itself
-    const escapedPath = srtFilterPath.replace(/'/g, "\\'");
+    const escapedPath = assFilterPath.replace(/'/g, "\\'");
 
-    // Subtitle style: white text, semi-transparent black box, raised above controls.
-    // No Fontname — Arial is unavailable on Linux; libass uses system/fallback font automatically.
-    const forceStyle = [
-        "Fontsize=22",
-        "PrimaryColour=&H00FFFFFF",  // white text
-        "BackColour=&H80000000",     // semi-transparent black box
-        "BorderStyle=3",             // opaque box style
-        "Outline=0",
-        "Shadow=0",
-        "Alignment=2",               // bottom-center
-        "MarginV=55",                // raise above controls
-    ].join(",");
+    // Use the `ass` filter (not `subtitles`) — it renders pre-formatted ASS directly.
+    // No fontsdir needed; style fonts fall back to libass built-in glyph renderer.
+    const vfFilter = `ass='${escapedPath}'`;
 
-    // On Linux, pass a fontsdir so libass can find system fonts (Amazon Linux has DejaVu)
-    const fontsdirOption = process.platform !== "win32"
-        ? ":fontsdir=/usr/share/fonts"
-        : "";
-
-    const vfFilter = `subtitles='${escapedPath}'${fontsdirOption}:force_style='${forceStyle}'`;
-
-    console.log("[ffmpeg] burnSubtitles platform:", process.platform);
-    console.log("[ffmpeg] burnSubtitles vf:", vfFilter);
-    console.log("[ffmpeg] burnSubtitles output:", outputPath);
+    console.log("[ffmpeg] platform:", process.platform);
+    console.log("[ffmpeg] vfFilter:", vfFilter);
+    console.log("[ffmpeg] output:", outputPath);
 
     return new Promise((resolve, reject) => {
         ffmpeg(videoPath)
             .outputOptions(["-y", "-c:v libx264", "-crf 18", "-preset veryfast", "-c:a copy"])
             .videoFilters(vfFilter)
             .on("end", () => {
-                console.log("[ffmpeg] burnSubtitles complete →", outputPath);
+                cleanupTempFile(assPath);
+                console.log("[ffmpeg] done →", outputPath);
                 resolve(outputPath);
             })
             .on("error", (err: Error, _stdout?: unknown, stderr?: unknown) => {
-                console.error("[ffmpeg] burnSubtitles stderr:", stderr);
+                cleanupTempFile(assPath);
+                console.error("[ffmpeg] stderr:", stderr);
                 reject(new Error(`FFmpeg burn error: ${err.message}\n${String(stderr ?? "")}`));
             })
             .save(outputPath);
