@@ -3,7 +3,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Wrapper from '../global/wrapper';
 import { Button } from '../ui/button';
-import { ArrowRightIcon, Loader2Icon, CheckCircle2Icon, DownloadIcon, RotateCcwIcon, FileVideoIcon, XCircleIcon, PlayCircleIcon, UploadCloudIcon } from 'lucide-react';
+import { ArrowRightIcon, Loader2Icon, CheckCircle2Icon, DownloadIcon, RotateCcwIcon, FileVideoIcon, XCircleIcon, PlayCircleIcon, UploadCloudIcon, Edit3Icon, SaveIcon, X as XIcon } from 'lucide-react';
 import { motion, useMotionValue, AnimatePresence } from 'motion/react';
 import { cn } from '@/utils';
 import Balancer from 'react-wrap-balancer';
@@ -69,6 +69,37 @@ function downloadSrt(srtContent: string, filename: string) {
     URL.revokeObjectURL(url);
 }
 
+function secondsToSrtTimestamp(seconds: number) {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds - Math.floor(seconds)) * 1000);
+    return `${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")},${String(ms).padStart(3, "0")}`;
+}
+
+function buildSrtFromSegments(segments: TranscriptionSegment[]) {
+    return segments.map((s, i) => {
+        const idx = i + 1;
+        const start = secondsToSrtTimestamp(s.start);
+        const end = secondsToSrtTimestamp(s.end);
+        return `${idx}\n${start} --> ${end}\n${s.text}\n`;
+    }).join("\n");
+}
+
+function buildVttFromSegments(segments: TranscriptionSegment[]) {
+    const body = segments.map((s) => {
+        const formatTime = (t: number) => {
+            const hh = Math.floor(t / 3600);
+            const mm = Math.floor((t % 3600) / 60);
+            const ss = Math.floor(t % 60);
+            const ms = Math.floor((t - Math.floor(t)) * 1000);
+            return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+        };
+        return `${formatTime(s.start)} --> ${formatTime(s.end)}\n${s.text}`;
+    }).join("\n\n");
+    return `WEBVTT\n\n${body}`;
+}
+
 async function downloadVideo(videoUrl: string, filename: string) {
     try {
         const res = await fetch(videoUrl);
@@ -113,6 +144,9 @@ const Hero = () => {
     const [srtContent, setSrtContent] = useState<string>("");
     const [teluguSrtContent, setTeluguSrtContent] = useState<string>("");
     const [segments, setSegments] = useState<TranscriptionSegment[]>([]);
+    const [editingSegmentId, setEditingSegmentId] = useState<string | number | null>(null);
+    const [editText, setEditText] = useState<string>("");
+    const [savingEdit, setSavingEdit] = useState(false);
     const [activeSubtitle, setActiveSubtitle] = useState<string>("");
     const [error, setError] = useState<string | null>(null);
 
@@ -245,6 +279,46 @@ const Hero = () => {
         setActiveSubtitle("");
         if (fileInputRef.current) fileInputRef.current.value = "";
     }, []);
+
+    // Save edited segments to server (persist SRT to R2)
+    const persistSubtitles = useCallback(async (newSegments: TranscriptionSegment[]) => {
+        if (!videoKey) return;
+        const newSrt = buildSrtFromSegments(newSegments);
+        try {
+            await fetch("/api/save-subtitles", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: videoKey, srtContent: newSrt }),
+            });
+        } catch (e) {
+            console.error("Failed to persist subtitles", e);
+        }
+    }, [videoKey]);
+
+    const startEdit = useCallback((seg: TranscriptionSegment) => {
+        setEditingSegmentId(seg.id);
+        setEditText(seg.text);
+    }, []);
+
+    const cancelEdit = useCallback(() => {
+        setEditingSegmentId(null);
+        setEditText("");
+    }, []);
+
+    const saveEdit = useCallback(async (segId: string | number) => {
+        if (!segId) return;
+        setSavingEdit(true);
+        const newSegments = segments.map(s => s.id === segId ? { ...s, text: editText } : s);
+        setSegments(newSegments);
+        // update client-side SRT and VTT immediately
+        setSrtContent(buildSrtFromSegments(newSegments));
+        setVttUrl(URL.createObjectURL(new Blob([buildVttFromSegments(newSegments)], { type: 'text/vtt' })));
+        // persist in background
+        await persistSubtitles(newSegments);
+        setSavingEdit(false);
+        setEditingSegmentId(null);
+        setEditText("");
+    }, [editText, segments, persistSubtitles]);
 
     const stepIndex = (s: ProcessingStep) => STEPS.findIndex(x => x.key === s);
     const currentStepIndex = stepIndex(processingStep);
@@ -565,14 +639,46 @@ const Hero = () => {
                                                 {segments.length === 0 ? (
                                                     <p className="text-xs text-muted-foreground p-4 text-center">No speech detected.</p>
                                                 ) : (
-                                                    segments.map((seg) => (
-                                                        <div key={seg.id} className="flex items-start gap-2 px-4 py-2.5">
-                                                            <span className="text-xs text-muted-foreground/50 font-mono mt-0.5 shrink-0 w-12">
-                                                                {formatTime(seg.start)}
-                                                            </span>
-                                                            <p className="text-xs text-foreground/90 leading-relaxed">{seg.text}</p>
-                                                        </div>
-                                                    ))
+                                                    segments.map((seg) => {
+                                                        const isEditing = editingSegmentId === seg.id;
+                                                        return (
+                                                            <div key={seg.id} className="group relative flex items-start gap-2 px-4 py-2.5">
+                                                                <span className="text-xs text-muted-foreground/50 font-mono mt-0.5 shrink-0 w-12">
+                                                                    {formatTime(seg.start)}
+                                                                </span>
+                                                                <div className="flex-1">
+                                                                    {isEditing ? (
+                                                                        <div className="flex items-start gap-2">
+                                                                            <textarea
+                                                                                autoFocus
+                                                                                value={editText}
+                                                                                onChange={(e) => setEditText(e.target.value)}
+                                                                                onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); saveEdit(seg.id); } }}
+                                                                                onBlur={() => { saveEdit(seg.id); }}
+                                                                                className="w-full text-xs p-2 rounded-md border border-foreground/10 resize-none"
+                                                                                rows={2}
+                                                                            />
+                                                                            <div className="flex flex-col gap-1 ml-2">
+                                                                                <button onClick={() => saveEdit(seg.id)} disabled={savingEdit} className="p-1 bg-primary/10 rounded-md text-primary hover:bg-primary/20">
+                                                                                    <SaveIcon className="size-3" />
+                                                                                </button>
+                                                                                <button onClick={cancelEdit} className="p-1 bg-transparent rounded-md text-muted-foreground hover:text-foreground">
+                                                                                    <XIcon className="size-3" />
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="flex items-start justify-between">
+                                                                            <p className="text-xs text-foreground/90 leading-relaxed">{seg.text}</p>
+                                                                            <button onClick={() => startEdit(seg)} title="Edit subtitle" className="opacity-0 group-hover:opacity-100 transition-opacity ml-3 text-muted-foreground hover:text-foreground">
+                                                                                <Edit3Icon className="size-4" />
+                                                                            </button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })
                                                 )}
                                             </div>
                                         </div>
