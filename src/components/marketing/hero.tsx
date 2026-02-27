@@ -97,7 +97,7 @@ function formatTime(seconds: number): string {
 
 const Hero = () => {
     const badge = "Telugu Subtitle AI";
-    const description = "Upload any Telugu video and get accurate, timestamped English subtitles in seconds — powered by Google Gemini AI. Download SRT files ready for YouTube, Premiere Pro, and every major video platform.";
+    const description = "Upload any video and get accurate, timestamped English subtitles in seconds —  Download SRT files ready for YouTube, Premiere Pro, and every major video platform.";
 
     // State
     const fileInputRef = useRef<HTMLInputElement>(null);
