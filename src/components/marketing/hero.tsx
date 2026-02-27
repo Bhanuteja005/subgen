@@ -708,7 +708,7 @@ const Hero = () => {
                                         </div>
 
                                         {/* Subtitles pane */}
-                                        <div className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-foreground/10 flex flex-col bg-background">
+                                        <div className="lg:w-80 xl:w-96 border-t lg:border-t-0 lg:border-l border-foreground/10 flex flex-col bg-background">
                                             <div className="flex items-center justify-between px-4 py-3 border-b border-foreground/10">
                                                 <span className="text-xs font-semibold text-foreground">
                                                     Subtitles · {segments.length} segments
@@ -741,8 +741,8 @@ const Hero = () => {
                                                         title="Download video with burned-in subtitles"
                                                         onClick={async () => {
                                                             if (!videoKey) return downloadVideo(videoUrl!, selectedFile?.name ?? "video.mp4");
+                                                            setBurningCaptioned(true);
                                                             try {
-                                                                setBurningCaptioned(true);
                                                                 const res = await fetch('/api/burn-subtitles', {
                                                                     method: 'POST',
                                                                     headers: { 'Content-Type': 'application/json' },
@@ -751,15 +751,36 @@ const Hero = () => {
                                                                 if (!res.ok) throw new Error(`Burn failed (${res.status})`);
                                                                 const data = await res.json();
                                                                 const url = data?.url ?? data?.publicUrl ?? null;
+                                                                const key = data?.key ?? null;
+                                                                if (!url && !key) throw new Error('No captioned URL returned');
+
+                                                                const tryHead = async (u: string) => {
+                                                                    try {
+                                                                        const h = await fetch(u + `?ts=${Date.now()}`, { method: 'HEAD' });
+                                                                        return h.ok;
+                                                                    } catch { return false; }
+                                                                };
+
                                                                 if (url) {
-                                                                    await downloadVideo(url, (selectedFile?.name ?? 'video').replace(/\.[^/.]+$/, '') + '_captioned.mp4');
-                                                                } else {
-                                                                    // fallback to original
-                                                                    await downloadVideo(videoUrl!, selectedFile?.name ?? 'video.mp4');
+                                                                    let ok = await tryHead(url);
+                                                                    const maxTries = 15;
+                                                                    let tries = 0;
+                                                                    while (!ok && tries < maxTries) {
+                                                                        await new Promise(r => setTimeout(r, 1500));
+                                                                        ok = await tryHead(url);
+                                                                        tries++;
+                                                                    }
+                                                                    if (ok) {
+                                                                        await downloadVideo(url + `?ts=${Date.now()}`, (selectedFile?.name ?? 'video').replace(/\.[^/.]+$/, '') + '_captioned.mp4');
+                                                                    } else {
+                                                                        throw new Error('Captioned file not available yet');
+                                                                    }
+                                                                } else if (key) {
+                                                                    throw new Error('Captioned URL not returned from server');
                                                                 }
-                                                            } catch (e) {
+                                                            } catch (e: any) {
                                                                 console.error('burn download failed', e);
-                                                                // fallback to original
+                                                                setError(e?.message ?? 'Burn failed');
                                                                 downloadVideo(videoUrl!, selectedFile?.name ?? 'video.mp4');
                                                             } finally {
                                                                 setBurningCaptioned(false);
@@ -809,14 +830,14 @@ const Hero = () => {
                                                                             <div className="flex items-center gap-2 w-full">
                                                                                                                                                     <div className="flex items-center gap-1">
                                                                                                                                                         <button onClick={() => adjustTimeText(true, -0.1)} title="-0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">-</button>
-                                                                                                                                                        <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-24" />
+                                                                                                                                                        <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-20" />
                                                                                                                                                         <button onClick={() => adjustTimeText(true, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
                                                                                                                                                     </div>
                                                                                 <span className="text-xs text-muted-foreground">→</span>
                                                                                 <div className="flex items-center gap-1">
                                                                                     <button onClick={() => adjustTimeText(false, -0.1)} title="-0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">-</button>
-                                                                                    <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-24" />
-                                                                                    <button onClick={() => adjustTimeText(false, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
+                                                                                        <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-20" />
+                                                                                        <button onClick={() => adjustTimeText(false, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
                                                                                 </div>
                                                                             </div>
                                                                             <div className="flex items-center gap-2">

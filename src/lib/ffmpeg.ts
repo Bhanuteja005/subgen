@@ -91,12 +91,16 @@ export async function burnSubtitles(videoPath: string, srtPath: string): Promise
     ensureFfmpegConfigured();
     const outputPath = path.join(os.tmpdir(), `captioned_${Date.now()}.mp4`).replace(/\\/g, "/");
     const input = videoPath.replace(/\\/g, "/");
-    const subs = srtPath.replace(/\\/g, "/");
+    const subsRaw = srtPath.replace(/\\/g, "/");
+    // FFmpeg subtitles filter needs special escaping on Windows paths (drive letters, backslashes)
+    // Escape single quotes, backslashes and colons for use inside single-quoted filter argument.
+    const subsEscaped = subsRaw.replace(/'/g, "\\'").replace(/\\/g, "\\\\").replace(/:/g, "\\:");
+    const subs = subsEscaped;
 
     return new Promise((resolve, reject) => {
         ffmpeg(input)
-            .outputOptions(["-c:v libx264", "-crf 18", "-preset veryfast", "-c:a copy"])
-            .videoFilters(`subtitles=${subs}`)
+            .outputOptions(["-y", "-c:v libx264", "-crf 18", "-preset veryfast", "-c:a copy"])
+            .videoFilters(`subtitles='${subs}'`)
             .on("end", () => resolve(outputPath))
             .on("error", (err) => reject(new Error(`FFmpeg burn error: ${err.message}`)))
             .save(outputPath);
