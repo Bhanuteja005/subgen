@@ -69,6 +69,24 @@ function downloadSrt(srtContent: string, filename: string) {
     URL.revokeObjectURL(url);
 }
 
+async function downloadVideo(videoUrl: string, filename: string) {
+    try {
+        const res = await fetch(videoUrl);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch {
+        // fallback: open in new tab
+        window.open(videoUrl, "_blank");
+    }
+}
+
 function formatTime(seconds: number): string {
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
@@ -501,6 +519,15 @@ const Hero = () => {
                                                             <DownloadIcon className="size-3" />తెలుగు
                                                         </Button>
                                                     )}
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-7 text-xs px-2 gap-1"
+                                                        title="Download original video"
+                                                        onClick={() => downloadVideo(videoUrl!, selectedFile?.name ?? "video.mp4")}
+                                                    >
+                                                        <DownloadIcon className="size-3" />Video
+                                                    </Button>
                                                 </div>
                                             </div>
                                             <div className="flex-1 overflow-y-auto divide-y divide-foreground/5 max-h-[300px] lg:max-h-full">
