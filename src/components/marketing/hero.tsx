@@ -219,7 +219,7 @@ const Hero = () => {
     const currentStepIndex = stepIndex(processingStep);
 
     return (
-        <section className="relative w-full flex items-center justify-center pt-16 lg:pt-32 pb-4 overflow-hidden">
+        <section id="upload" className="relative w-full flex items-center justify-center pt-16 lg:pt-32 pb-4 overflow-hidden">
             <Wrapper className="relative z-10">
                 <div className="flex flex-col items-center text-center">
                     {/* Badge */}

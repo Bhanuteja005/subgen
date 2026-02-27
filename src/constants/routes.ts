@@ -7,5 +7,5 @@ export const Routes = {
     Integrations: "/#integrations",
     Membership: "/#membership",
 
-    Dashboard: "/dashboard",
+    Dashboard: "/#upload",
 } as const;
