@@ -162,6 +162,7 @@ const Hero = () => {
     const [timeEndText, setTimeEndText] = useState<string>("");
     const [activeSubtitle, setActiveSubtitle] = useState<string>("");
     const [error, setError] = useState<string | null>(null);
+    const [burningCaptioned, setBurningCaptioned] = useState(false);
 
     // Auto-delete from R2 after 5 min
     useEffect(() => {
@@ -698,7 +699,7 @@ const Hero = () => {
                                                 className="w-full h-full max-h-[480px] object-contain"
                                             />
                                             {activeSubtitle && (
-                                                <div className="absolute bottom-12 left-0 right-0 flex justify-center px-6 pointer-events-none">
+                                                <div className="absolute bottom-20 left-0 right-0 flex justify-center px-6 pointer-events-none">
                                                     <span className="bg-black/80 text-white text-sm md:text-base px-4 py-1.5 rounded-md text-center leading-snug shadow-lg whitespace-normal break-words max-w-[calc(100%-48px)]">
                                                         {activeSubtitle}
                                                     </span>
@@ -737,10 +738,36 @@ const Hero = () => {
                                                         size="sm"
                                                         variant="outline"
                                                         className="h-7 text-xs px-2 gap-1"
-                                                        title="Download original video"
-                                                        onClick={() => downloadVideo(videoUrl!, selectedFile?.name ?? "video.mp4")}
+                                                        title="Download video with burned-in subtitles"
+                                                        onClick={async () => {
+                                                            if (!videoKey) return downloadVideo(videoUrl!, selectedFile?.name ?? "video.mp4");
+                                                            try {
+                                                                setBurningCaptioned(true);
+                                                                const res = await fetch('/api/burn-subtitles', {
+                                                                    method: 'POST',
+                                                                    headers: { 'Content-Type': 'application/json' },
+                                                                    body: JSON.stringify({ key: videoKey, srtContent: srtContent || undefined }),
+                                                                });
+                                                                if (!res.ok) throw new Error(`Burn failed (${res.status})`);
+                                                                const data = await res.json();
+                                                                const url = data?.url ?? data?.publicUrl ?? null;
+                                                                if (url) {
+                                                                    await downloadVideo(url, (selectedFile?.name ?? 'video').replace(/\.[^/.]+$/, '') + '_captioned.mp4');
+                                                                } else {
+                                                                    // fallback to original
+                                                                    await downloadVideo(videoUrl!, selectedFile?.name ?? 'video.mp4');
+                                                                }
+                                                            } catch (e) {
+                                                                console.error('burn download failed', e);
+                                                                // fallback to original
+                                                                downloadVideo(videoUrl!, selectedFile?.name ?? 'video.mp4');
+                                                            } finally {
+                                                                setBurningCaptioned(false);
+                                                            }
+                                                        }}
+                                                        disabled={burningCaptioned}
                                                     >
-                                                        <DownloadIcon className="size-3" />Video
+                                                        {burningCaptioned ? <><Loader2Icon className="size-3 mr-1 animate-spin" />Burning…</> : <><DownloadIcon className="size-3" />Video</>}
                                                     </Button>
                                                 </div>
                                             </div>
@@ -780,15 +807,15 @@ const Hero = () => {
                                                                     ) : isTimeEditing ? (
                                                                         <div className="flex flex-col gap-2">
                                                                             <div className="flex items-center gap-2 w-full">
-                                                                                <div className="flex items-center gap-1">
-                                                                                    <button onClick={() => adjustTimeText(true, -0.1)} title="-0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">-</button>
-                                                                                    <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
-                                                                                    <button onClick={() => adjustTimeText(true, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
-                                                                                </div>
+                                                                                                                                                    <div className="flex items-center gap-1">
+                                                                                                                                                        <button onClick={() => adjustTimeText(true, -0.1)} title="-0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">-</button>
+                                                                                                                                                        <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-24" />
+                                                                                                                                                        <button onClick={() => adjustTimeText(true, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
+                                                                                                                                                    </div>
                                                                                 <span className="text-xs text-muted-foreground">→</span>
                                                                                 <div className="flex items-center gap-1">
                                                                                     <button onClick={() => adjustTimeText(false, -0.1)} title="-0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">-</button>
-                                                                                    <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
+                                                                                    <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-24" />
                                                                                     <button onClick={() => adjustTimeText(false, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
                                                                                 </div>
                                                                             </div>
