@@ -6,6 +6,10 @@ import fs from "fs";
 const client = new OpenAI({
     apiKey: process.env.FASTROUTER_API_KEY!,
     baseURL: process.env.FASTROUTER_BASE_URL!,
+    // Explicit timeout: throw a clean error before Vercel's 300s gateway kills the function.
+    // This gives us a readable error instead of a silent 504.
+    timeout: 240_000, // 240 seconds
+    maxRetries: 0,    // no silent retries — fail fast with a clear message
 });
 
 // Gemini 3.1 Pro Preview: multimodal (audio/text), better token efficiency, 1M context
@@ -29,10 +33,13 @@ export async function transcribeTeluguAudio(
 ): Promise<TranscriptionSegment[]> {
     const audioBuffer = fs.readFileSync(audioFilePath);
     const base64Audio = audioBuffer.toString("base64");
+    console.log(`[FastRouter] sending ${(audioBuffer.length / 1024).toFixed(0)} KB audio to ${TRANSCRIPTION_MODEL}`);
 
-    const response = await client.chat.completions.create({
-        model: TRANSCRIPTION_MODEL,
-        messages: [
+    let response;
+    try {
+        response = await client.chat.completions.create({
+            model: TRANSCRIPTION_MODEL,
+            messages: [
             {
                 role: "user",
                 // image_url with audio data URI is the correct format for Gemini
@@ -68,7 +75,21 @@ Requirements:
         temperature: 0,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         max_tokens: 8192,
-    });
+        });
+    } catch (apiErr: unknown) {
+        const msg = apiErr instanceof Error ? apiErr.message : String(apiErr);
+        // Surface a clear error for auth/balance/timeout failures
+        if (msg.includes("401") || msg.toLowerCase().includes("unauthorized") || msg.toLowerCase().includes("invalid api key")) {
+            throw new Error("[FastRouter] API key rejected (401) — check FASTROUTER_API_KEY env var and account balance.");
+        }
+        if (msg.toLowerCase().includes("timeout") || msg.toLowerCase().includes("timed out")) {
+            throw new Error("[FastRouter] Request timed out after 240 s — audio may be too long or FastRouter is overloaded.");
+        }
+        if (msg.includes("402") || msg.toLowerCase().includes("insufficient") || msg.toLowerCase().includes("balance")) {
+            throw new Error("[FastRouter] Insufficient balance — top up credits at fastrouter.ai dashboard.");
+        }
+        throw new Error(`[FastRouter] API error: ${msg}`);
+    }
 
     const content = response.choices[0]?.message?.content?.trim() ?? "";
     console.log("[Gemini] raw response (first 800 chars):", content.slice(0, 800));
