@@ -87,3 +87,11 @@ export async function getObjectStream(key: string) {
 export function getPublicUrl(key: string): string {
     return `${PUBLIC_URL}/${key}`;
 }
+
+export async function generatePresignedGetUrl(key: string, expiresIn = 900): Promise<string> {
+    const command = new GetObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+    });
+    return getSignedUrl(r2Client, command, { expiresIn });
+}

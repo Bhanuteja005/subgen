@@ -3,7 +3,7 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 import { Readable } from "stream";
-import { getObjectStream, uploadStreamToR2, getPublicUrl } from "@/lib/r2";
+import { getObjectStream, uploadStreamToR2, generatePresignedGetUrl } from "@/lib/r2";
 import { burnSubtitles } from "@/lib/ffmpeg";
 import { cleanupTempFile } from "@/lib/ffmpeg";
 
@@ -68,7 +68,9 @@ export async function POST(req: Request) {
         cleanupTempFile(srtTemp);
         cleanupTempFile(outPath);
 
-        return NextResponse.json({ ok: true, key: outKey, url: getPublicUrl(outKey) });
+        // Return a presigned GET URL so production/private R2 buckets can be fetched by browsers
+        const presignedUrl = await generatePresignedGetUrl(outKey, 60 * 10);
+        return NextResponse.json({ ok: true, key: outKey, url: presignedUrl });
     } catch (err: any) {
         console.error("burn-subtitles error", err);
         return NextResponse.json({ error: err?.message ?? String(err) }, { status: 500 });

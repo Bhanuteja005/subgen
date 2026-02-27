@@ -98,9 +98,11 @@ export async function burnSubtitles(videoPath: string, srtPath: string): Promise
     const subs = subsEscaped;
 
     return new Promise((resolve, reject) => {
+        // Use ASS/force_style to ensure a readable white-on-black box and lift subtitles above controls
+        const forceStyle = "Fontname=Arial,Fontsize=28,PrimaryColour=&H00FFFFFF,BackColour=&H00000000,BorderStyle=3,Outline=2,Shadow=0,MarginV=60";
         ffmpeg(input)
             .outputOptions(["-y", "-c:v libx264", "-crf 18", "-preset veryfast", "-c:a copy"])
-            .videoFilters(`subtitles='${subs}'`)
+            .videoFilters(`subtitles='${subs}':force_style='${forceStyle}'`)
             .on("end", () => resolve(outputPath))
             .on("error", (err) => reject(new Error(`FFmpeg burn error: ${err.message}`)))
             .save(outputPath);
