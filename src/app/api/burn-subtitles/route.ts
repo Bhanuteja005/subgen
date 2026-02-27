@@ -8,6 +8,7 @@ import { burnSubtitles } from "@/lib/ffmpeg";
 import { cleanupTempFile } from "@/lib/ffmpeg";
 
 export const runtime = "nodejs";
+export const maxDuration = 300; // allow up to 5 min for ffmpeg encoding
 
 export async function POST(req: Request) {
     try {

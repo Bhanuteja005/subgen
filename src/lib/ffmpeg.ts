@@ -40,6 +40,10 @@ function ensureFfmpegConfigured(): void {
     if (_ffmpegConfigured) return;
     const ffPath = resolveFfmpegPath();
     try {
+        // On Lambda/Linux ensure the binary has the executable bit set
+        if (process.platform !== "win32") {
+            try { fs.chmodSync(ffPath, 0o755); } catch { /* already executable */ }
+        }
         ffmpeg.setFfmpegPath(ffPath);
         _ffmpegConfigured = true;
     } catch (e) {
@@ -107,22 +111,29 @@ export async function burnSubtitles(videoPath: string, srtPath: string): Promise
     // Escape any single quotes in the path itself
     const escapedPath = srtFilterPath.replace(/'/g, "\\'");
 
-    // Subtitle style: white text, semi-transparent black opaque-box, raised above controls.
-    // No Fontname — Arial is unavailable on Linux; omitting lets ffmpeg pick the best available font.
+    // Subtitle style: white text, semi-transparent black box, raised above controls.
+    // No Fontname — Arial is unavailable on Linux; libass uses system/fallback font automatically.
     const forceStyle = [
         "Fontsize=22",
-        "PrimaryColour=&H00FFFFFF",  // white text  (&HAABBGGRR, AA=00 = fully opaque)
-        "BackColour=&H80000000",     // semi-transparent black box (AA=80 = ~50% transparent)
-        "BorderStyle=3",             // opaque/box style (renders BackColour as solid background)
+        "PrimaryColour=&H00FFFFFF",  // white text
+        "BackColour=&H80000000",     // semi-transparent black box
+        "BorderStyle=3",             // opaque box style
         "Outline=0",
         "Shadow=0",
         "Alignment=2",               // bottom-center
-        "MarginV=55",                // raise above controls / mic / toolbar
+        "MarginV=55",                // raise above controls
     ].join(",");
 
-    const vfFilter = `subtitles='${escapedPath}':force_style='${forceStyle}'`;
+    // On Linux, pass a fontsdir so libass can find system fonts (Amazon Linux has DejaVu)
+    const fontsdirOption = process.platform !== "win32"
+        ? ":fontsdir=/usr/share/fonts"
+        : "";
 
+    const vfFilter = `subtitles='${escapedPath}'${fontsdirOption}:force_style='${forceStyle}'`;
+
+    console.log("[ffmpeg] burnSubtitles platform:", process.platform);
     console.log("[ffmpeg] burnSubtitles vf:", vfFilter);
+    console.log("[ffmpeg] burnSubtitles output:", outputPath);
 
     return new Promise((resolve, reject) => {
         ffmpeg(videoPath)
@@ -132,9 +143,9 @@ export async function burnSubtitles(videoPath: string, srtPath: string): Promise
                 console.log("[ffmpeg] burnSubtitles complete →", outputPath);
                 resolve(outputPath);
             })
-            .on("error", (err, _stdout, stderr) => {
+            .on("error", (err: Error, _stdout?: unknown, stderr?: unknown) => {
                 console.error("[ffmpeg] burnSubtitles stderr:", stderr);
-                reject(new Error(`FFmpeg burn error: ${err.message}\n${stderr ?? ""}`));
+                reject(new Error(`FFmpeg burn error: ${err.message}\n${String(stderr ?? "")}`));
             })
             .save(outputPath);
     });
