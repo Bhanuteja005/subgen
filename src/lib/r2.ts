@@ -46,6 +46,27 @@ export async function uploadBufferToR2(
     return `${PUBLIC_URL}/${key}`;
 }
 
+/**
+ * Streams an upload directly to R2 without buffering in Node.js memory.
+ * Requires the caller to pass the exact byte length for S3 compatibility.
+ */
+export async function uploadStreamToR2(
+    key: string,
+    body: NodeJS.ReadableStream | Buffer,
+    contentType: string,
+    contentLength: number
+): Promise<string> {
+    const command = new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        Body: body as any,
+        ContentType: contentType,
+        ContentLength: contentLength,
+    });
+    await r2Client.send(command);
+    return `${PUBLIC_URL}/${key}`;
+}
+
 export async function deleteFromR2(key: string): Promise<void> {
     const command = new DeleteObjectCommand({
         Bucket: BUCKET,

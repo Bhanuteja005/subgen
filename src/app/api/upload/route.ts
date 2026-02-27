@@ -1,32 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
-import { uploadBufferToR2 } from "@/lib/r2";
+import { uploadStreamToR2, getPublicUrl } from "@/lib/r2";
 import { v4 as uuidv4 } from "uuid";
+import { Readable } from "stream";
 
-// Allow up to 500 MB uploads
+// Allow up to 5 minutes; no formData buffering — body is streamed directly to R2
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
     try {
-        const formData = await request.formData();
-        const file = formData.get("file") as File | null;
+        // Read metadata from headers — avoids multipart/formData body parsing entirely
+        const contentType = (request.headers.get("x-file-type") ?? "video/mp4").toLowerCase();
+        const filename = decodeURIComponent(request.headers.get("x-file-name") ?? "upload.mp4");
+        const contentLength = parseInt(request.headers.get("x-file-size") ?? "0", 10);
 
-        if (!file) {
-            return NextResponse.json({ error: "No file provided" }, { status: 400 });
-        }
-
-        if (!file.type.startsWith("video/")) {
+        if (!contentType.startsWith("video/")) {
             return NextResponse.json({ error: "Only video files are accepted" }, { status: 400 });
         }
 
-        const ext = file.name.split(".").pop() ?? "mp4";
+        if (!request.body) {
+            return NextResponse.json({ error: "No file body received" }, { status: 400 });
+        }
+
+        const ext = filename.split(".").pop()?.toLowerCase() ?? "mp4";
         const key = `telugu-subtitles/${uuidv4()}.${ext}`;
 
-        const buffer = Buffer.from(await file.arrayBuffer());
-        const publicUrl = await uploadBufferToR2(key, buffer, file.type || "video/mp4");
+        // Convert Web ReadableStream → Node.js Readable for AWS SDK
+        const nodeStream = Readable.fromWeb(request.body as any);
 
-        return NextResponse.json({ key, url: publicUrl });
+        await uploadStreamToR2(key, nodeStream, contentType, contentLength);
+
+        return NextResponse.json({ key, url: getPublicUrl(key) });
     } catch (error) {
         console.error("Upload error:", error);
-        return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+        const message = error instanceof Error ? error.message : "Upload failed";
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

@@ -164,11 +164,24 @@ const Hero = () => {
         setProcessingStep("uploading"); setUploadProgress(0);
 
         try {
-            // 1. Upload to server (proxy to R2 — avoids browser CORS)
-            const formData = new FormData();
-            formData.append("file", selectedFile);
-            const res = await fetch("/api/upload", { method: "POST", body: formData });
-            if (!res.ok) throw new Error((await res.json()).error ?? "Upload failed");
+            // 1. Upload to server — stream raw binary body to avoid FormData 413 limits
+            const res = await fetch("/api/upload", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/octet-stream",
+                    "X-File-Name": encodeURIComponent(selectedFile.name),
+                    "X-File-Type": selectedFile.type || "video/mp4",
+                    "X-File-Size": String(selectedFile.size),
+                },
+                body: selectedFile,
+                // @ts-expect-error — duplex is required for streaming request bodies
+                duplex: "half",
+            });
+            if (!res.ok) {
+                let errMsg = "Upload failed";
+                try { errMsg = (await res.json()).error ?? errMsg; } catch { errMsg = `Upload failed (${res.status})`; }
+                throw new Error(errMsg);
+            }
             const { key } = await res.json();
             setVideoKey(key);
             setUploadProgress(100);
@@ -181,7 +194,11 @@ const Hero = () => {
                 body: JSON.stringify({ key }),
             });
             setProcessingStep("transcribing");
-            if (!pRes.ok) throw new Error((await pRes.json()).error ?? "Processing failed");
+            if (!pRes.ok) {
+                let errMsg = "Processing failed";
+                try { errMsg = (await pRes.json()).error ?? errMsg; } catch { errMsg = `Processing failed (${pRes.status})`; }
+                throw new Error(errMsg);
+            }
             const data = await pRes.json();
 
             // 3. Build VTT blob
