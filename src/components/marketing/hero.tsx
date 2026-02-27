@@ -97,7 +97,7 @@ function formatTime(seconds: number): string {
 
 const Hero = () => {
     const badge = "Telugu Subtitle AI";
-    const description = "Powered by Whisper AI, SubGen converts Telugu speech into phonetically accurate, romanized subtitles with frame-precise timestamps — export-ready in SRT and VTT for any video editor.";
+    const description = "Upload any Telugu video and get accurate, timestamped English subtitles in seconds — powered by Google Gemini AI. Download SRT files ready for YouTube, Premiere Pro, and every major video platform.";
 
     // State
     const fileInputRef = useRef<HTMLInputElement>(null);
