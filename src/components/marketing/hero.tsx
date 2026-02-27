@@ -554,7 +554,7 @@ const Hero = () => {
 
                     <div className="absolute top-0 inset-x-0 w-3/5 mx-auto h-1/10 rounded-full bg-primary blur-[4rem] opacity-40 -z-10" />
 
-                    {badges.map((b, i) => (
+                    {appState !== "done" && badges.map((b, i) => (
                         <FloatingBadge key={i} text={b.text} top={b.top} left={b.left} right={b.right} index={i} />
                     ))}
                 </motion.div>
