@@ -743,45 +743,37 @@ const Hero = () => {
                                                             if (!videoKey) return downloadVideo(videoUrl!, selectedFile?.name ?? "video.mp4");
                                                             setBurningCaptioned(true);
                                                             try {
+                                                                // Step 1: burn subtitles server-side
                                                                 const res = await fetch('/api/burn-subtitles', {
                                                                     method: 'POST',
                                                                     headers: { 'Content-Type': 'application/json' },
                                                                     body: JSON.stringify({ key: videoKey, srtContent: srtContent || undefined }),
                                                                 });
-                                                                if (!res.ok) throw new Error(`Burn failed (${res.status})`);
-                                                                const data = await res.json();
-                                                                const url = data?.url ?? data?.publicUrl ?? null;
-                                                                const key = data?.key ?? null;
-                                                                if (!url && !key) throw new Error('No captioned URL returned');
-
-                                                                const tryHead = async (u: string) => {
-                                                                    try {
-                                                                        const h = await fetch(u + `?ts=${Date.now()}`, { method: 'HEAD' });
-                                                                        return h.ok;
-                                                                    } catch { return false; }
-                                                                };
-
-                                                                if (url) {
-                                                                    let ok = await tryHead(url);
-                                                                    const maxTries = 15;
-                                                                    let tries = 0;
-                                                                    while (!ok && tries < maxTries) {
-                                                                        await new Promise(r => setTimeout(r, 1500));
-                                                                        ok = await tryHead(url);
-                                                                        tries++;
-                                                                    }
-                                                                    if (ok) {
-                                                                        await downloadVideo(url + `?ts=${Date.now()}`, (selectedFile?.name ?? 'video').replace(/\.[^/.]+$/, '') + '_captioned.mp4');
-                                                                    } else {
-                                                                        throw new Error('Captioned file not available yet');
-                                                                    }
-                                                                } else if (key) {
-                                                                    throw new Error('Captioned URL not returned from server');
+                                                                if (!res.ok) {
+                                                                    const errBody = await res.json().catch(() => ({}));
+                                                                    throw new Error(errBody?.error ?? `Burn failed (${res.status})`);
                                                                 }
+                                                                const data = await res.json();
+                                                                const outKey = data?.key;
+                                                                if (!outKey) throw new Error('Server did not return captioned video key');
+
+                                                                // Step 2: download via our server proxy — no R2 CORS issues
+                                                                const downloadName = (selectedFile?.name ?? 'video').replace(/\.[^/.]+$/, '') + '_captioned.mp4';
+                                                                const proxyUrl = `/api/download-video?key=${encodeURIComponent(outKey)}`;
+                                                                const dlRes = await fetch(proxyUrl);
+                                                                if (!dlRes.ok) throw new Error(`Download proxy failed (${dlRes.status})`);
+                                                                const blob = await dlRes.blob();
+                                                                const blobUrl = URL.createObjectURL(blob);
+                                                                const a = document.createElement('a');
+                                                                a.href = blobUrl;
+                                                                a.download = downloadName;
+                                                                document.body.appendChild(a);
+                                                                a.click();
+                                                                document.body.removeChild(a);
+                                                                URL.revokeObjectURL(blobUrl);
                                                             } catch (e: any) {
                                                                 console.error('burn download failed', e);
-                                                                setError(e?.message ?? 'Burn failed');
-                                                                downloadVideo(videoUrl!, selectedFile?.name ?? 'video.mp4');
+                                                                setError(e?.message ?? 'Burn failed — please try again');
                                                             } finally {
                                                                 setBurningCaptioned(false);
                                                             }
