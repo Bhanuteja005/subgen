@@ -35,13 +35,24 @@ function resolveFfmpegPath(): string {
     return "ffmpeg";
 }
 
-ffmpeg.setFfmpegPath(resolveFfmpegPath());
+let _ffmpegConfigured = false;
+function ensureFfmpegConfigured(): void {
+    if (_ffmpegConfigured) return;
+    const ffPath = resolveFfmpegPath();
+    try {
+        ffmpeg.setFfmpegPath(ffPath);
+        _ffmpegConfigured = true;
+    } catch (e) {
+        console.warn('[ffmpeg] failed to set ffmpeg path during runtime configuration', e);
+    }
+}
 
 /**
  * Extracts audio from a video file and saves it as a WAV file.
  * Returns the path to the extracted audio file.
  */
 export async function extractAudio(videoPath: string): Promise<string> {
+    ensureFfmpegConfigured();
     // Use forward slashes — ffmpeg on Windows can choke on backslash paths
     const audioPath = path.join(os.tmpdir(), `audio_${Date.now()}.wav`).replace(/\\/g, "/");
     const inputPath = videoPath.replace(/\\/g, "/");
@@ -77,6 +88,7 @@ export function cleanupTempFile(filePath: string): void {
  * Returns the path to the output file.
  */
 export async function burnSubtitles(videoPath: string, srtPath: string): Promise<string> {
+    ensureFfmpegConfigured();
     const outputPath = path.join(os.tmpdir(), `captioned_${Date.now()}.mp4`).replace(/\\/g, "/");
     const input = videoPath.replace(/\\/g, "/");
     const subs = srtPath.replace(/\\/g, "/");

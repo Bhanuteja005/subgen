@@ -7,7 +7,7 @@ import { getObjectStream, uploadStreamToR2, getPublicUrl } from "@/lib/r2";
 import { burnSubtitles } from "@/lib/ffmpeg";
 import { cleanupTempFile } from "@/lib/ffmpeg";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
     try {

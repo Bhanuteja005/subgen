@@ -120,8 +120,16 @@ async function downloadVideo(videoUrl: string, filename: string) {
 
 function formatTime(seconds: number): string {
     const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    const s = seconds % 60;
+    const secStr = s.toFixed(1); // show tenths (e.g., 01.2)
+    const [secsWhole, secsDec] = secStr.split('.');
+    return `${String(m).padStart(2, '0')}:${String(secsWhole).padStart(2, '0')}.${secsDec}`;
+}
+
+function formatInputTime(seconds: number): string {
+    const mm = Math.floor(seconds / 60);
+    const ss = (seconds % 60).toFixed(1);
+    return `${String(mm).padStart(2, '0')}:${ss}`;
 }
 
 // ─── Hero ─────────────────────────────────────────────────────────────────────
@@ -312,11 +320,7 @@ const Hero = () => {
 
     const startEditTime = useCallback((seg: TranscriptionSegment) => {
         setEditingTimeSegmentId(seg.id);
-        const fmt = (t: number) => {
-            const mm = Math.floor(t / 60);
-            const ss = (t % 60).toFixed(3);
-            return `${String(mm).padStart(2,'0')}:${ss}`;
-        };
+        const fmt = (t: number) => formatInputTime(t);
         setTimeStartText(fmt(seg.start));
         setTimeEndText(fmt(seg.end));
     }, []);
@@ -326,6 +330,14 @@ const Hero = () => {
         setTimeStartText("");
         setTimeEndText("");
     }, []);
+
+    const adjustTimeText = useCallback((isStart: boolean, delta: number) => {
+        const cur = isStart ? timeStartText : timeEndText;
+        const seconds = parseTimeInput(cur);
+        const ns = Math.max(0, Number((seconds + delta).toFixed(3)));
+        const formatted = formatInputTime(ns);
+        if (isStart) setTimeStartText(formatted); else setTimeEndText(formatted);
+    }, [timeStartText, timeEndText]);
 
     function parseTimeInput(input: string) {
         // Accept formats: SS, MM:SS, MM:SS.mmm, HH:MM:SS.mmm
@@ -687,7 +699,7 @@ const Hero = () => {
                                             />
                                             {activeSubtitle && (
                                                 <div className="absolute bottom-12 left-0 right-0 flex justify-center px-6 pointer-events-none">
-                                                    <span className="bg-black/80 text-white text-sm md:text-base px-4 py-1.5 rounded-md text-center leading-snug max-w-[90%] shadow-lg whitespace-normal break-words">
+                                                    <span className="bg-black/80 text-white text-sm md:text-base px-4 py-1.5 rounded-md text-center leading-snug shadow-lg whitespace-normal break-words max-w-[calc(100%-48px)]">
                                                         {activeSubtitle}
                                                     </span>
                                                 </div>
@@ -768,9 +780,17 @@ const Hero = () => {
                                                                     ) : isTimeEditing ? (
                                                                         <div className="flex flex-col gap-2">
                                                                             <div className="flex items-center gap-2 w-full">
-                                                                                <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
+                                                                                <div className="flex items-center gap-1">
+                                                                                    <button onClick={() => adjustTimeText(true, -0.1)} title="-0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">-</button>
+                                                                                    <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
+                                                                                    <button onClick={() => adjustTimeText(true, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
+                                                                                </div>
                                                                                 <span className="text-xs text-muted-foreground">→</span>
-                                                                                <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
+                                                                                <div className="flex items-center gap-1">
+                                                                                    <button onClick={() => adjustTimeText(false, -0.1)} title="-0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">-</button>
+                                                                                    <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
+                                                                                    <button onClick={() => adjustTimeText(false, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
+                                                                                </div>
                                                                             </div>
                                                                             <div className="flex items-center gap-2">
                                                                                 <button onClick={() => saveEditTime(seg.id)} title="Save time" className="p-1 bg-primary/10 rounded-md">
