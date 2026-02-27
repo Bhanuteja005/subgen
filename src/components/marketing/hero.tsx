@@ -149,6 +149,9 @@ const Hero = () => {
     const [savingEdit, setSavingEdit] = useState(false);
     const [lastEdit, setLastEdit] = useState<null | { segId: string | number; previousSegments: TranscriptionSegment[]; previousText: string }>(null);
     const [toastVisible, setToastVisible] = useState(false);
+    const [editingTimeSegmentId, setEditingTimeSegmentId] = useState<string | number | null>(null);
+    const [timeStartText, setTimeStartText] = useState<string>("");
+    const [timeEndText, setTimeEndText] = useState<string>("");
     const [activeSubtitle, setActiveSubtitle] = useState<string>("");
     const [error, setError] = useState<string | null>(null);
 
@@ -306,6 +309,65 @@ const Hero = () => {
         setEditingSegmentId(null);
         setEditText("");
     }, []);
+
+    const startEditTime = useCallback((seg: TranscriptionSegment) => {
+        setEditingTimeSegmentId(seg.id);
+        const fmt = (t: number) => {
+            const mm = Math.floor(t / 60);
+            const ss = (t % 60).toFixed(3);
+            return `${String(mm).padStart(2,'0')}:${ss}`;
+        };
+        setTimeStartText(fmt(seg.start));
+        setTimeEndText(fmt(seg.end));
+    }, []);
+
+    const cancelEditTime = useCallback(() => {
+        setEditingTimeSegmentId(null);
+        setTimeStartText("");
+        setTimeEndText("");
+    }, []);
+
+    function parseTimeInput(input: string) {
+        // Accept formats: SS, MM:SS, MM:SS.mmm, HH:MM:SS.mmm
+        const parts = input.split(":").map(p => p.trim());
+        let seconds = 0;
+        if (parts.length === 1) {
+            seconds = parseFloat(parts[0]);
+        } else if (parts.length === 2) {
+            const mm = parseInt(parts[0] || "0", 10);
+            const ss = parseFloat(parts[1] || "0");
+            seconds = mm * 60 + ss;
+        } else if (parts.length === 3) {
+            const hh = parseInt(parts[0] || "0", 10);
+            const mm = parseInt(parts[1] || "0", 10);
+            const ss = parseFloat(parts[2] || "0");
+            seconds = hh * 3600 + mm * 60 + ss;
+        }
+        return isFinite(seconds) ? Math.max(0, seconds) : 0;
+    }
+
+    const saveEditTime = useCallback(async (segId: string | number) => {
+        if (!segId) return;
+        const prev = segments.map(s => ({ ...s }));
+        const newSegments = segments.map(s => {
+            if (s.id === segId) {
+                const start = parseTimeInput(timeStartText);
+                const end = parseTimeInput(timeEndText);
+                return { ...s, start, end: Math.max(end, start + 0.001) };
+            }
+            return s;
+        });
+        setLastEdit({ segId, previousSegments: prev, previousText: prev.find(p => p.id === segId)?.text ?? "" });
+        setSegments(newSegments);
+        setSrtContent(buildSrtFromSegments(newSegments));
+        setVttUrl(URL.createObjectURL(new Blob([buildVttFromSegments(newSegments)], { type: 'text/vtt' })));
+        try { await persistSubtitles(newSegments); } catch (e) { console.error('persist time edit failed', e); }
+        setEditingTimeSegmentId(null);
+        setTimeStartText("");
+        setTimeEndText("");
+        setToastVisible(true);
+        window.setTimeout(() => setToastVisible(false), 6000);
+    }, [segments, timeStartText, timeEndText, persistSubtitles]);
 
     const saveEdit = useCallback(async (segId: string | number) => {
         if (!segId) return;
@@ -676,6 +738,7 @@ const Hero = () => {
                                                 ) : (
                                                     segments.map((seg) => {
                                                         const isEditing = editingSegmentId === seg.id;
+                                                        const isTimeEditing = editingTimeSegmentId === seg.id;
                                                         return (
                                                             <div key={seg.id} className="group relative flex items-start gap-2 px-4 py-2.5">
                                                                 <span className="text-xs text-muted-foreground/50 font-mono mt-0.5 shrink-0 w-12">
@@ -702,12 +765,27 @@ const Hero = () => {
                                                                                 </button>
                                                                             </div>
                                                                         </div>
+                                                                    ) : isTimeEditing ? (
+                                                                        <div className="flex items-center gap-2">
+                                                                            <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
+                                                                            <span className="text-xs text-muted-foreground">→</span>
+                                                                            <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
+                                                                            <div className="flex items-center gap-1 ml-2">
+                                                                                <button onClick={() => saveEditTime(seg.id)} className="text-xs px-2 py-1 bg-primary/10 rounded-md">Save</button>
+                                                                                <button onClick={cancelEditTime} className="text-xs px-2 py-1 bg-transparent rounded-md">Cancel</button>
+                                                                            </div>
+                                                                        </div>
                                                                     ) : (
                                                                         <div className="flex items-start justify-between">
                                                                             <p className="text-xs text-foreground/90 leading-relaxed">{seg.text}</p>
-                                                                            <button onClick={() => startEdit(seg)} title="Edit subtitle" className="opacity-0 group-hover:opacity-100 transition-opacity ml-3 text-muted-foreground hover:text-foreground">
-                                                                                <Edit3Icon className="size-4" />
-                                                                            </button>
+                                                                            <div className="flex items-center gap-2">
+                                                                                <button onClick={() => startEdit(seg)} title="Edit subtitle" className="opacity-0 group-hover:opacity-100 transition-opacity ml-3 text-muted-foreground hover:text-foreground">
+                                                                                    <Edit3Icon className="size-4" />
+                                                                                </button>
+                                                                                <button onClick={() => startEditTime(seg)} title="Edit times" className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground text-xs px-2 py-0.5 rounded-md">
+                                                                                    ⏱️
+                                                                                </button>
+                                                                            </div>
                                                                         </div>
                                                                     )}
                                                                 </div>
