@@ -547,7 +547,7 @@ const Hero = () => {
                                                     </Button>
                                                 </div>
                                             </div>
-                                            <div className="flex-1 overflow-y-auto divide-y divide-foreground/5 max-h-[300px] lg:max-h-full">
+                                            <div className="flex-1 overflow-y-auto divide-y divide-foreground/5 max-h-[300px] lg:max-h-[480px]">
                                                 {segments.length === 0 ? (
                                                     <p className="text-xs text-muted-foreground p-4 text-center">No speech detected.</p>
                                                 ) : (
