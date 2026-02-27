@@ -147,6 +147,8 @@ const Hero = () => {
     const [editingSegmentId, setEditingSegmentId] = useState<string | number | null>(null);
     const [editText, setEditText] = useState<string>("");
     const [savingEdit, setSavingEdit] = useState(false);
+    const [lastEdit, setLastEdit] = useState<null | { segId: string | number; previousSegments: TranscriptionSegment[]; previousText: string }>(null);
+    const [toastVisible, setToastVisible] = useState(false);
     const [activeSubtitle, setActiveSubtitle] = useState<string>("");
     const [error, setError] = useState<string | null>(null);
 
@@ -308,7 +310,11 @@ const Hero = () => {
     const saveEdit = useCallback(async (segId: string | number) => {
         if (!segId) return;
         setSavingEdit(true);
+        const previousSegments = segments.map(s => ({ ...s }));
+        const prevText = previousSegments.find(s => s.id === segId)?.text ?? "";
         const newSegments = segments.map(s => s.id === segId ? { ...s, text: editText } : s);
+        // keep last edit for undo
+        setLastEdit({ segId, previousSegments, previousText: prevText });
         setSegments(newSegments);
         // update client-side SRT and VTT immediately
         setSrtContent(buildSrtFromSegments(newSegments));
@@ -318,7 +324,24 @@ const Hero = () => {
         setSavingEdit(false);
         setEditingSegmentId(null);
         setEditText("");
+        // show toast with undo
+        setToastVisible(true);
+        window.setTimeout(() => setToastVisible(false), 6000);
     }, [editText, segments, persistSubtitles]);
+
+    const undoEdit = useCallback(async () => {
+        if (!lastEdit) return;
+        setSegments(lastEdit.previousSegments);
+        setSrtContent(buildSrtFromSegments(lastEdit.previousSegments));
+        setVttUrl(URL.createObjectURL(new Blob([buildVttFromSegments(lastEdit.previousSegments)], { type: 'text/vtt' })));
+        try {
+            await persistSubtitles(lastEdit.previousSegments);
+        } catch (e) {
+            console.error('undo persist failed', e);
+        }
+        setLastEdit(null);
+        setToastVisible(false);
+    }, [lastEdit, persistSubtitles]);
 
     const stepIndex = (s: ProcessingStep) => STEPS.findIndex(x => x.key === s);
     const currentStepIndex = stepIndex(processingStep);
@@ -432,6 +455,18 @@ const Hero = () => {
                         )}
                     </motion.div>
                 </div>
+                {/* Toast: save success + undo */}
+                {toastVisible && (
+                    <div className="fixed right-6 bottom-6 z-50">
+                        <div className="flex items-center gap-3 bg-card border border-foreground/10 px-4 py-2 rounded-lg shadow-lg">
+                            <div className="text-sm text-foreground">Saved subtitle</div>
+                            <div className="flex items-center gap-2">
+                                <button className="text-xs text-primary underline" onClick={undoEdit}>Undo</button>
+                                <button className="text-xs text-muted-foreground" onClick={() => setToastVisible(false)}>Dismiss</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* ── Dashboard frame ── */}
                 <motion.div
