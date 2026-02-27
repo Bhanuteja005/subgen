@@ -766,11 +766,13 @@ const Hero = () => {
                                                                             </div>
                                                                         </div>
                                                                     ) : isTimeEditing ? (
-                                                                        <div className="flex items-center gap-2">
-                                                                            <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
-                                                                            <span className="text-xs text-muted-foreground">→</span>
-                                                                            <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28" />
-                                                                            <div className="flex items-center gap-1 ml-2">
+                                                                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                                                            <div className="flex items-center gap-2 w-full">
+                                                                                <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28 sm:w-28" />
+                                                                                <span className="text-xs text-muted-foreground hidden sm:inline">→</span>
+                                                                                <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-28 sm:w-28" />
+                                                                            </div>
+                                                                            <div className="flex items-center gap-2">
                                                                                 <button onClick={() => saveEditTime(seg.id)} className="text-xs px-2 py-1 bg-primary/10 rounded-md">Save</button>
                                                                                 <button onClick={cancelEditTime} className="text-xs px-2 py-1 bg-transparent rounded-md">Cancel</button>
                                                                             </div>
