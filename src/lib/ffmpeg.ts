@@ -4,18 +4,34 @@ import os from "os";
 import fs from "fs";
 
 // Resolve the real ffmpeg binary path at runtime.
-// Next.js bundler rewrites static imports of ffmpeg-static to virtual \ROOT\ paths,
-// so we use process.cwd() to build the real path instead.
+// Priority: require('ffmpeg-static') → manual path candidates → system PATH
 function resolveFfmpegPath(): string {
-    // Try the standard ffmpeg-static location relative to project root
+    // 1. Use require() since ffmpeg-static is in serverExternalPackages — works on all platforms
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const ffmpegPath = require("ffmpeg-static") as string;
+        if (ffmpegPath && fs.existsSync(ffmpegPath)) {
+            console.log("[ffmpeg] resolved via require:", ffmpegPath);
+            return ffmpegPath;
+        }
+    } catch { /* fall through */ }
+
+    // 2. Manual search across known install locations
+    const ext = process.platform === "win32" ? ".exe" : "";
     const candidates = [
-        path.join(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg.exe"),  // Windows
-        path.join(process.cwd(), "node_modules", "ffmpeg-static", "ffmpeg"),      // Linux/Mac
+        path.join(process.cwd(), "node_modules", "ffmpeg-static", `ffmpeg${ext}`),
+        path.join("/var/task", "node_modules", "ffmpeg-static", `ffmpeg${ext}`), // Vercel Lambda
+        path.join("/opt", "ffmpeg"),                                                // Lambda Layer
     ];
     for (const candidate of candidates) {
-        if (fs.existsSync(candidate)) return candidate;
+        if (fs.existsSync(candidate)) {
+            console.log("[ffmpeg] resolved via candidate:", candidate);
+            return candidate;
+        }
     }
-    // Last resort: let the system PATH find it
+
+    // 3. Rely on system PATH (local dev / Docker)
+    console.warn("[ffmpeg] binary not found in node_modules, falling back to PATH");
     return "ffmpeg";
 }
 

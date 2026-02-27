@@ -67,42 +67,91 @@ Requirements:
         ],
         temperature: 0,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        max_tokens: 4096,
+        max_tokens: 8192,
     });
 
     const content = response.choices[0]?.message?.content?.trim() ?? "";
-    console.log("[Gemini] raw response (first 500 chars):", content.slice(0, 500));
+    console.log("[Gemini] raw response (first 800 chars):", content.slice(0, 800));
     if (!content) return [];
 
+    // ── Attempt 1: full JSON array parse ─────────────────────────────────────
     try {
-        // Strip markdown code fences if model wraps response
-        const jsonMatch = content.match(/\[[\s\S]*\]/);
-        if (!jsonMatch) {
-            // No JSON array found — return content as single untimed segment
-            return [{ id: 1, start: 0, end: 30, text: content, originalText: content }];
+        // Strip optional markdown code fences
+        const stripped = content
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```$/, "")
+            .trim();
+
+        // Find the outermost [...] array
+        const start = stripped.indexOf("[");
+        const end = stripped.lastIndexOf("]");
+        if (start !== -1 && end > start) {
+            const jsonSlice = stripped.slice(start, end + 1);
+            const parsed = JSON.parse(jsonSlice) as Array<{
+                id: number;
+                start: number;
+                end: number;
+                text: string;
+                originalText: string;
+            }>;
+            const result = parsed
+                .filter(s => !!s.text?.trim())
+                .map((s, i) => ({
+                    id: s.id ?? i + 1,
+                    start: Number(s.start) || 0,
+                    end: Number(s.end) || (Number(s.start) || 0) + 2,
+                    text: s.text?.trim() ?? "",
+                    originalText: s.originalText?.trim() || s.text?.trim() || "",
+                }));
+            if (result.length > 0) return result;
         }
-
-        const parsed = JSON.parse(jsonMatch[0]) as Array<{
-            id: number;
-            start: number;
-            end: number;
-            text: string;
-            originalText: string;
-        }>;
-
-        return parsed
-            .filter(s => !!s.text?.trim())
-            .map((s, i) => ({
-                id: s.id ?? i + 1,
-                start: Number(s.start) || 0,
-                end: Number(s.end) || (Number(s.start) || 0) + 2,
-                text: s.text?.trim() ?? "",
-                originalText: s.originalText?.trim() || s.text?.trim() || "",
-            }));
-    } catch {
-        // JSON parse failed — wrap the raw content as a single segment
-        return content
-            ? [{ id: 1, start: 0, end: 30, text: content, originalText: content }]
-            : [];
+    } catch (e) {
+        console.warn("[Gemini] full JSON parse failed:", e);
     }
+
+    // ── Attempt 2: recover individual objects from truncated/partial JSON ────
+    // Handles responses cut off mid-array due to token limits
+    try {
+        const objects: TranscriptionSegment[] = [];
+        const objectRegex = /\{[^{}]*"text"[^{}]*\}/g;
+        let match;
+        let idx = 0;
+        while ((match = objectRegex.exec(content)) !== null) {
+            try {
+                const obj = JSON.parse(match[0]) as {
+                    id?: number;
+                    start?: number;
+                    end?: number;
+                    text?: string;
+                    originalText?: string;
+                };
+                if (obj.text?.trim()) {
+                    objects.push({
+                        id: obj.id ?? ++idx,
+                        start: Number(obj.start) || 0,
+                        end: Number(obj.end) || (Number(obj.start) || 0) + 2,
+                        text: obj.text.trim(),
+                        originalText: obj.originalText?.trim() || obj.text.trim(),
+                    });
+                }
+            } catch { /* skip malformed object */ }
+        }
+        if (objects.length > 0) {
+            console.log("[Gemini] recovered", objects.length, "segments from partial JSON");
+            return objects;
+        }
+    } catch (e) {
+        console.warn("[Gemini] object-level recovery failed:", e);
+    }
+
+    // ── Attempt 3: plain text fallback — no timestamps ────────────────────────
+    // Only if the response doesn't look like JSON at all
+    const looksLikeJson = content.includes('"text"') || content.startsWith("[");
+    if (!looksLikeJson) {
+        console.warn("[Gemini] no JSON found, returning as plain text segment");
+        return [{ id: 1, start: 0, end: 30, text: content, originalText: content }];
+    }
+
+    console.error("[Gemini] all parse strategies failed. Raw content:", content.slice(0, 200));
+    return [];
 }
