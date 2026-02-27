@@ -89,22 +89,53 @@ export function cleanupTempFile(filePath: string): void {
  */
 export async function burnSubtitles(videoPath: string, srtPath: string): Promise<string> {
     ensureFfmpegConfigured();
-    const outputPath = path.join(os.tmpdir(), `captioned_${Date.now()}.mp4`).replace(/\\/g, "/");
-    const input = videoPath.replace(/\\/g, "/");
-    const subsRaw = srtPath.replace(/\\/g, "/");
-    // FFmpeg subtitles filter needs special escaping on Windows paths (drive letters, backslashes)
-    // Escape single quotes, backslashes and colons for use inside single-quoted filter argument.
-    const subsEscaped = subsRaw.replace(/'/g, "\\'").replace(/\\/g, "\\\\").replace(/:/g, "\\:");
-    const subs = subsEscaped;
+    // Use a short output filename with no special characters
+    const id = Date.now();
+    const outputPath = path.join(os.tmpdir(), `cap${id}.mp4`);
+
+    // Platform-aware escaping for the subtitles filter path argument.
+    // On Windows the drive-letter colon (C:) must be escaped as C\:
+    // On Linux/production (Vercel) the path is already safe — do NOT escape colons or it breaks.
+    let srtFilterPath: string;
+    if (process.platform === "win32") {
+        srtFilterPath = srtPath
+            .replace(/\\/g, "/")          // backslash → forward slash
+            .replace(/^([A-Za-z]):/, "$1\\:"); // C: → C\:
+    } else {
+        srtFilterPath = srtPath; // Linux: use path as-is
+    }
+    // Escape any single quotes in the path itself
+    const escapedPath = srtFilterPath.replace(/'/g, "\\'");
+
+    // Subtitle style: white text, semi-transparent black opaque-box, raised above controls.
+    // No Fontname — Arial is unavailable on Linux; omitting lets ffmpeg pick the best available font.
+    const forceStyle = [
+        "Fontsize=22",
+        "PrimaryColour=&H00FFFFFF",  // white text  (&HAABBGGRR, AA=00 = fully opaque)
+        "BackColour=&H80000000",     // semi-transparent black box (AA=80 = ~50% transparent)
+        "BorderStyle=3",             // opaque/box style (renders BackColour as solid background)
+        "Outline=0",
+        "Shadow=0",
+        "Alignment=2",               // bottom-center
+        "MarginV=55",                // raise above controls / mic / toolbar
+    ].join(",");
+
+    const vfFilter = `subtitles='${escapedPath}':force_style='${forceStyle}'`;
+
+    console.log("[ffmpeg] burnSubtitles vf:", vfFilter);
 
     return new Promise((resolve, reject) => {
-        // Use ASS/force_style to ensure a readable white-on-black box and lift subtitles above controls
-        const forceStyle = "Fontname=Arial,Fontsize=28,PrimaryColour=&H00FFFFFF,BackColour=&H00000000,BorderStyle=3,Outline=2,Shadow=0,MarginV=60";
-        ffmpeg(input)
+        ffmpeg(videoPath)
             .outputOptions(["-y", "-c:v libx264", "-crf 18", "-preset veryfast", "-c:a copy"])
-            .videoFilters(`subtitles='${subs}':force_style='${forceStyle}'`)
-            .on("end", () => resolve(outputPath))
-            .on("error", (err) => reject(new Error(`FFmpeg burn error: ${err.message}`)))
+            .videoFilters(vfFilter)
+            .on("end", () => {
+                console.log("[ffmpeg] burnSubtitles complete →", outputPath);
+                resolve(outputPath);
+            })
+            .on("error", (err, _stdout, stderr) => {
+                console.error("[ffmpeg] burnSubtitles stderr:", stderr);
+                reject(new Error(`FFmpeg burn error: ${err.message}\n${stderr ?? ""}`));
+            })
             .save(outputPath);
     });
 }

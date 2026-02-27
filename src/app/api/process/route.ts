@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getObjectStream, getPublicUrl } from "@/lib/r2";
+import { getObjectStream, getPublicUrl, uploadBufferToR2 } from "@/lib/r2";
 import { extractAudio, cleanupTempFile } from "@/lib/ffmpeg";
 import { transcribeTeluguAudio } from "@/lib/fastrouter";
 import { segmentsToSrt, segmentsToVtt, segmentsToOriginalSrt } from "@/lib/srt";
@@ -67,7 +67,15 @@ export async function POST(request: NextRequest) {
         const vttContent = segmentsToVtt(segments);       // transliterated (Latin) — for video overlay
         const teluguSrtContent = segmentsToOriginalSrt(segments); // original Telugu script
 
-        // Step 5: Get the public video URL
+        // Step 5: Persist SRT to R2 so the burn endpoint can use it as a fallback
+        try {
+            const base = key.replace(/\.[^/.]+$/, "");
+            await uploadBufferToR2(`${base}.srt`, Buffer.from(srtContent, "utf-8"), "text/plain");
+        } catch (uploadErr) {
+            console.warn("Failed to save SRT to R2 (non-fatal):", uploadErr);
+        }
+
+        // Step 6: Get the public video URL
         const videoUrl = getPublicUrl(key);
 
         return NextResponse.json({

@@ -38,21 +38,39 @@ export async function POST(req: Request) {
         if (srtContent) {
             fs.writeFileSync(srtTemp, srtContent, "utf-8");
         } else {
-            const srtKey = `${base}.edited.srt`;
-            try {
-                const sStream = await getObjectStream(srtKey);
-                if (!sStream) throw new Error("no srt");
-                await new Promise<void>((resolve, reject) => {
-                    const ws = fs.createWriteStream(srtTemp);
-                    (sStream as unknown as Readable).pipe(ws);
-                    ws.on("finish", resolve);
-                    ws.on("error", reject);
-                });
-            } catch (err) {
+            // Try edited SRT first, then fall back to original
+            const editedKey = `${base}.edited.srt`;
+            const originalKey = `${base}.srt`;
+            let fetched = false;
+
+            for (const srtKey of [editedKey, originalKey]) {
+                try {
+                    const sStream = await getObjectStream(srtKey);
+                    if (!sStream) continue;
+                    await new Promise<void>((resolve, reject) => {
+                        const ws = fs.createWriteStream(srtTemp);
+                        (sStream as unknown as Readable).pipe(ws);
+                        ws.on("finish", resolve);
+                        ws.on("error", reject);
+                    });
+                    console.log("[burn] fetched SRT from R2:", srtKey);
+                    fetched = true;
+                    break;
+                } catch {
+                    // try next key
+                }
+            }
+
+            if (!fetched) {
                 cleanupTempFile(videoTemp);
-                return NextResponse.json({ error: "No SRT provided and no edited SRT found" }, { status: 400 });
+                return NextResponse.json({ error: "No SRT content provided — please regenerate subtitles" }, { status: 400 });
             }
         }
+
+        // Verify SRT file was written correctly before burning
+        const srtStats = fs.statSync(srtTemp);
+        console.log("[burn] srtTemp:", srtTemp, "size:", srtStats.size);
+        console.log("[burn] videoTemp:", videoTemp);
 
         // Burn subtitles
         const outPath = await burnSubtitles(videoTemp, srtTemp);
