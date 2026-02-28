@@ -1,12 +1,29 @@
 /**
  * Client-side subtitle burning using @ffmpeg/ffmpeg (WebAssembly).
  *
- * Uses `drawtext` filter (FreeType, built into @ffmpeg/core@0.12.x).
- * The `subtitles`/`ass` filters (libass) are NOT present in @ffmpeg/core@0.12.x.
+ * Uses `drawtext` filter with `textfile=` option (FreeType, built into
+ * @ffmpeg/core@0.12.x).  `subtitles`/`ass` filters require libass which is
+ * NOT compiled into @ffmpeg/core@0.12.x.
  *
- * DataCloneError prevention:
- *   ffmpeg.wasm transfers (detaches) the ArrayBuffer behind every Uint8Array
- *   passed to writeFile. Always call .slice() before passing cached bytes.
+ * Key design decisions:
+ *
+ * 1. textfile= instead of text='...'
+ *    Putting raw subtitle text into the filter string requires multi-level
+ *    escaping (backslash, single-quote, colon, percent).  Any apostrophe,
+ *    comma, or colon in the text silently corrupts the option-value parser,
+ *    which shifts where enable= starts, which then swallows the filter-chain
+ *    separator comma into the expression evaluator → exit 1.
+ *    textfile= reads text from an in-memory wasm-FS file – zero escaping.
+ *
+ * 2. between(t\,a\,b) for enable=
+ *    With text= off the filter string, option parsing is stable.  The \,
+ *    (backslash-comma) escape is the correct way to include a literal comma
+ *    inside an ffmpeg option value.  step() does NOT exist in libavutil eval.
+ *
+ * 3. .slice() on every Uint8Array passed to writeFile()
+ *    ffmpeg.wasm transfers (detaches) the underlying ArrayBuffer via
+ *    postMessage.  Module-level caches (.slice() not called) would raise
+ *    DataCloneError on the second call.
  */
 
 import { FFmpeg } from "@ffmpeg/ffmpeg";
@@ -30,7 +47,7 @@ async function getFont(): Promise<Uint8Array> {
     return _fontCache;
 }
 
-// ── FFmpeg loader ─────────────────────────────────────────────────────────────
+// ── FFmpeg singleton ──────────────────────────────────────────────────────────
 
 async function loadFFmpeg(onPct?: (n: number) => void): Promise<FFmpeg> {
     if (_ff) return _ff;
@@ -38,9 +55,6 @@ async function loadFFmpeg(onPct?: (n: number) => void): Promise<FFmpeg> {
 
     _loadPromise = (async () => {
         const ff = new FFmpeg();
-        // no-op log handler replaced after load to collect stderr per-exec
-        ff.on("log", () => { /* captured per-exec below */ });
-
         onPct?.(5);
         const [coreURL, wasmURL] = await Promise.all([
             toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, "text/javascript"),
@@ -65,53 +79,46 @@ export function resetFFmpegInstance(): void {
     _loadPromise = null;
 }
 
-// ── SRT helpers ───────────────────────────────────────────────────────────────
+// ── SRT parsing ───────────────────────────────────────────────────────────────
 
-/** HH:MM:SS,mmm → seconds */
+interface Cue { start: number; end: number; text: string }
+
+/** HH:MM:SS,mmm  or  HH:MM:SS.mmm  →  seconds */
 function parseSrtTime(ts: string): number {
-    const [hms, frac = "0"] = ts.replace(",", ".").split(".");
+    const norm = ts.replace(",", ".");
+    const dotIdx = norm.lastIndexOf(".");
+    const hms = dotIdx >= 0 ? norm.slice(0, dotIdx) : norm;
+    const frac = dotIdx >= 0 ? norm.slice(dotIdx + 1) : "0";
     const [h = 0, m = 0, s = 0] = hms.split(":").map(Number);
-    return h * 3600 + m * 60 + s + Number(frac) / 1000;
+    return h * 3600 + m * 60 + s + Number(frac) / Math.pow(10, frac.length);
 }
 
 /**
- * Sanitise text for use inside drawtext's text='...' (single-quoted).
+ * Prepare cue text to be written into a wasm-FS file (textfile=).
  *
- * ffmpeg filter-graph escaping (innermost → outermost):
- *   1. Backslash:   \  →  \\
- *   2. Single quote: ' →  \'
- *   3. Colon:       :  →  \:
- *   4. Percent:     %  →  %%
- *
- * In addition we strip HTML tags and any character outside printable ASCII
- * (0x20-0x7E) because drawtext's FreeType renderer only supports the glyphs
- * present in the supplied font file (DejaVu Sans covers full Latin but not
- * Telugu script).  The transcription is transliterated English so this should
- * never drop real content.
+ * The text is NOT embedded in the filter string, so no ffmpeg filter escaping
+ * is needed.  We only:
+ *   - strip HTML tags
+ *   - flatten multiline cues
+ *   - strip non-ASCII (DejaVu Sans covers Latin; transliteration is ASCII)
+ *   - double % (ffmpeg expands strftime/pts specifiers even in textfile values)
  */
-function sanitise(raw: string): string {
+function prepareText(raw: string): string {
     return raw
-        .replace(/<[^>]+>/g, "")               // strip <i>, <b> …
-        .replace(/\r?\n/g, " ")                 // flatten multiline
-        .replace(/[^\x20-\x7E]/g, "")           // ASCII printable only
-        .replace(/\\/g, "\\\\")                 // 1. backslash
-        .replace(/'/g, "\\'")                   // 2. single quote
-        .replace(/:/g, "\\:")                   // 3. colon
-        .replace(/%/g, "%%")                    // 4. percent
+        .replace(/<[^>]+>/g, "")      // strip <i>, <b>, etc.
+        .replace(/\r?\n/g, " ")       // flatten multiline
+        .replace(/[^\x20-\x7E]/g, "") // strip non-ASCII
+        .replace(/%/g, "%%")          // guard against strftime expansion
         .replace(/\s+/g, " ")
         .trim();
 }
 
-/**
- * Build the ffmpeg -vf filter string from SRT content.
- * Each cue becomes one drawtext segment gated by enable='between(t,…)'.
- */
-function buildFilter(srt: string): string {
-    const cues = srt.trim().split(/\r?\n\r?\n+/);
-    const segments: string[] = [];
+function parseSrt(srt: string): Cue[] {
+    const blocks = srt.trim().split(/\r?\n\r?\n+/);
+    const cues: Cue[] = [];
 
-    for (const cue of cues) {
-        const lines = cue.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    for (const block of blocks) {
+        const lines = block.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
         if (lines.length < 2) continue;
         const ti = lines.findIndex(l => l.includes("-->"));
         if (ti < 0) continue;
@@ -119,25 +126,38 @@ function buildFilter(srt: string): string {
             /(\d{1,2}:\d{2}:\d{2}[,.]\d+)\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d+)/
         );
         if (!m) continue;
-
-        const start = parseSrtTime(m[1]);
-        const end   = parseSrtTime(m[2]);
-        const text  = sanitise(lines.slice(ti + 1).join(" "));
+        const text = prepareText(lines.slice(ti + 1).join(" "));
         if (!text) continue;
+        cues.push({ start: parseSrtTime(m[1]), end: parseSrtTime(m[2]), text });
+    }
 
-        // ffmpeg filter-option escaping: \, is a literal comma inside an option
-        // value; the unescaped , after the closing paren is the filter-chain
-        // separator.  between(t,a,b) is available in libavutil eval; step() is
-        // NOT.  Single-quoting the enable= value is unreliable in the wasm UMD
-        // build, so we use \, (backslash-comma) escaping instead.
-        //
-        // Resulting string passed to ffmpeg (per segment):
-        //   drawtext=fontfile=font.ttf:...:enable=between(t\,14.000\,18.500)
-        //                                                 ^^           ^^  — literal commas
-        //   then , before next drawtext= is the chain separator.
+    return cues;
+}
+
+// ── Filter builder ────────────────────────────────────────────────────────────
+
+/**
+ * Build the -vf filter string.
+ *
+ * Each segment uses textfile=cue_N.txt so the subtitle text never appears in
+ * the filter string — no escaping issues whatsoever.
+ *
+ * enable=between(t\,start\,end) — \, is ffmpeg's option-level comma escape
+ * (documented in ffmpeg-filters.html#Filtering-Guide).  between() is a real
+ * libavutil eval function; step() is NOT.
+ */
+function buildFilter(cues: Cue[]): { vfFilter: string; cueFiles: string[] } {
+    const segments: string[] = [];
+    const cueFiles: string[] = [];
+
+    for (let i = 0; i < cues.length; i++) {
+        const { start, end } = cues[i];
+        const fname = `cue_${i}.txt`;
+        cueFiles.push(fname);
+
         segments.push(
             `drawtext=fontfile=font.ttf` +
-            `:text='${text}'` +
+            `:textfile=${fname}` +
             `:fontsize=16` +
             `:fontcolor=white` +
             `:box=1` +
@@ -150,7 +170,7 @@ function buildFilter(srt: string): string {
     }
 
     if (segments.length === 0) throw new Error("SRT has no parseable cues.");
-    return segments.join(",");
+    return { vfFilter: segments.join(","), cueFiles };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -161,7 +181,12 @@ export async function burnSubtitlesWasm(
     outputFilename: string,
     onProgress?: (phase: string, pct: number) => void,
 ): Promise<void> {
-    // 1. Download video + font in parallel ─────────────────────────────────────
+    // 1. Parse SRT (pure JS – fail fast before any network/wasm work) ──────────
+    const cues = parseSrt(srtContent);
+    if (cues.length === 0) throw new Error("SRT has no parseable cues.");
+    const { vfFilter, cueFiles } = buildFilter(cues);
+
+    // 2. Download video + font in parallel ─────────────────────────────────────
     onProgress?.("Downloading…", 0);
     const [videoRes, font] = await Promise.all([
         fetch(`/api/download-video?key=${encodeURIComponent(videoKey)}`),
@@ -175,14 +200,11 @@ export async function burnSubtitlesWasm(
     const videoBuf = await videoRes.arrayBuffer();
     onProgress?.("Downloading…", 100);
 
-    // 2. Load wasm (singleton) ─────────────────────────────────────────────────
+    // 3. Load wasm (singleton – cached after first load) ───────────────────────
     onProgress?.("Loading encoder…", 0);
     const ff = await loadFFmpeg(n => onProgress?.("Loading encoder…", n));
 
-    // 3. Build filter (pure JS — validate before touching wasm) ───────────────
-    const vfFilter = buildFilter(srtContent);
-
-    // 4. Collect log lines so we can surface the real error if exit ≠ 0 ───────
+    // 4. Collect log lines to surface in error messages ────────────────────────
     const logLines: string[] = [];
     const logHandler = ({ message }: { message: string }) => {
         logLines.push(message);
@@ -194,28 +216,33 @@ export async function burnSubtitlesWasm(
         onProgress?.("Burning subtitles…", Math.min(99, Math.round(progress * 100)));
     ff.on("progress", onProg);
 
+    const enc = new TextEncoder();
+
     try {
         onProgress?.("Burning subtitles…", 0);
 
-        // IMPORTANT: always slice() — writeFile() transfers the ArrayBuffer
-        // via postMessage, detaching the source.  Cached copies must survive.
+        // Write inputs — always slice() so cached ArrayBuffers aren't detached
         await ff.writeFile("input.mp4", new Uint8Array(videoBuf.slice(0)));
-        await ff.writeFile("font.ttf",  font.slice());
+        await ff.writeFile("font.ttf", font.slice());
+
+        // Write one text file per cue — no filter-string escaping needed
+        for (let i = 0; i < cues.length; i++) {
+            await ff.writeFile(`cue_${i}.txt`, enc.encode(cues[i].text));
+        }
 
         const ret = await ff.exec([
-            "-i",      "input.mp4",
-            "-vf",     vfFilter,
-            "-c:v",    "libx264",
-            "-preset", "ultrafast",
-            "-crf",    "23",
-            "-c:a",    "copy",
+            "-i",        "input.mp4",
+            "-vf",       vfFilter,
+            "-c:v",      "libx264",
+            "-preset",   "ultrafast",
+            "-crf",      "23",
+            "-c:a",      "copy",
             "-movflags", "+faststart",
             "output.mp4",
         ]);
 
         if (ret !== 0) {
-            // Grab last 20 log lines for diagnosis
-            const tail = logLines.slice(-20).join("\n");
+            const tail = logLines.slice(-25).join("\n");
             throw new Error(`FFmpeg encode failed (exit ${ret}):\n${tail}`);
         }
 
@@ -233,9 +260,10 @@ export async function burnSubtitlesWasm(
 
         onProgress?.("Done!", 100);
     } finally {
-        ff.off("log",      logHandler);
+        ff.off("log", logHandler);
         ff.off("progress", onProg);
-        for (const f of ["input.mp4", "font.ttf", "output.mp4"]) {
+        const toDelete = ["input.mp4", "font.ttf", "output.mp4", ...cueFiles];
+        for (const f of toDelete) {
             try { await ff.deleteFile(f); } catch { /**/ }
         }
     }
