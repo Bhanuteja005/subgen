@@ -94,23 +94,55 @@ function parseSrtTime(ts: string): number {
 }
 
 /**
+ * Wrap a single line of text at word boundaries so it fits within the
+ * horizontal safe-area for vertical videos (≤40 chars per line).
+ * drawtext with textfile= treats \n as a hard line break.
+ */
+function wrapText(line: string, maxChars = 40): string {
+    const words = line.split(" ");
+    const out: string[] = [];
+    let cur = "";
+    for (const w of words) {
+        if (!w) continue;
+        if (cur.length === 0) {
+            cur = w;
+        } else if (cur.length + 1 + w.length <= maxChars) {
+            cur += " " + w;
+        } else {
+            out.push(cur);
+            cur = w;
+        }
+    }
+    if (cur) out.push(cur);
+    return out.join("\n");
+}
+
+/**
  * Prepare cue text to be written into a wasm-FS file (textfile=).
  *
  * The text is NOT embedded in the filter string, so no ffmpeg filter escaping
  * is needed.  We only:
  *   - strip HTML tags
- *   - flatten multiline cues
  *   - strip non-ASCII (DejaVu Sans covers Latin; transliteration is ASCII)
  *   - double % (ffmpeg expands strftime/pts specifiers even in textfile values)
+ *   - word-wrap every SRT line at 40 chars so text never overflows narrow
+ *     (vertical/portrait) videos
  */
 function prepareText(raw: string): string {
-    return raw
-        .replace(/<[^>]+>/g, "")      // strip <i>, <b>, etc.
-        .replace(/\r?\n/g, " ")       // flatten multiline
-        .replace(/[^\x20-\x7E]/g, "") // strip non-ASCII
-        .replace(/%/g, "%%")          // guard against strftime expansion
-        .replace(/\s+/g, " ")
+    const cleaned = raw
+        .replace(/<[^>]+>/g, "")       // strip <i>, <b>, etc.
+        .replace(/[^\x20-\x7E\r\n]/g, "") // strip non-ASCII, keep newlines
+        .replace(/%/g, "%%")           // guard against strftime expansion
+        .replace(/\r\n/g, "\n")        // normalise line endings
         .trim();
+
+    // Wrap each existing SRT line independently, then flatten to the
+    // final \n-separated string that drawtext will render.
+    return cleaned
+        .split("\n")
+        .flatMap(l => wrapText(l.trim()).split("\n"))
+        .filter(l => l.length > 0)
+        .join("\n");
 }
 
 function parseSrt(srt: string): Cue[] {
@@ -164,7 +196,9 @@ function buildFilter(cues: Cue[]): { vfFilter: string; cueFiles: string[] } {
             `:boxcolor=black@0.75` +
             `:boxborderw=6` +
             `:x=(w-text_w)/2` +
-            `:y=h-text_h-50` +
+            // Push up enough to clear player controls (progress bar, buttons).
+            // text_h already accounts for multiple wrapped lines.
+            `:y=h-text_h-120` +
             `:enable=between(t\\,${start.toFixed(3)}\\,${end.toFixed(3)})`
         );
     }
