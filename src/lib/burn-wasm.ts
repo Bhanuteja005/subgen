@@ -190,21 +190,13 @@ function buildFilter(cues: Cue[]): { vfFilter: string; cueFiles: string[] } {
         segments.push(
             `drawtext=fontfile=font.ttf` +
             `:textfile=${fname}` +
-            // fontsize is relative to the shorter side of the video so it
-            // looks identical on portrait reels (1080×1920) and landscape
-            // videos (1920×1080).  min(w\,h)/22 ≈ 49px for 1080p content —
-            // clearly legible on any resolution.  The \, is ffmpeg's
-            // option-level comma escape (same pattern as between() below).
-            `:fontsize=min(w\\,h)/22` +
+            `:fontsize=52` +
             `:fontcolor=white` +
             `:box=1` +
             `:boxcolor=black@0.75` +
-            // boxborderw also scales with video size
-            `:boxborderw=min(w\\,h)/120` +
+            `:boxborderw=10` +
             `:x=(w-text_w)/2` +
-            // y is proportional — h/14 ≈ 7% from bottom, scales with every
-            // resolution so text never clips or sits too low.
-            `:y=h-text_h-(h/14)` +
+            `:y=h-text_h-80` +
             `:enable=between(t\\,${start.toFixed(3)}\\,${end.toFixed(3)})`
         );
     }
