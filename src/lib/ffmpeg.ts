@@ -87,128 +87,158 @@ export function cleanupTempFile(filePath: string): void {
     }
 }
 
-/**
- * Convert an SRT string to ASS format with embedded styles.
- *
- * Style: white bold text on a solid black box (BorderStyle=3).
- * This matches the website subtitle overlay exactly and works with libass's
- * built-in glyph renderer — no system fonts needed on Lambda.
- */
-function srtToAss(srtContent: string): string {
-    // Normalise Windows CRLF → LF so block splitting works regardless of origin
+// ─────────────────────────────────────────────────────────────────────────────
+// Subtitle burning — drawtext approach
+//
+// We parse the SRT ourselves and render each segment with ffmpeg's `drawtext`
+// filter.  Unlike `ass` / `subtitles` filters, drawtext uses FreeType directly
+// (no libass, no system font directory) so it works on every platform including
+// Vercel Lambda which has NO system fonts at all.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface SrtSegment {
+    start: number;  // seconds (float)
+    end: number;
+    text: string;   // single line (multi-line joined with " ")
+}
+
+/** Parse an SRT string into timed text segments */
+function parseSrt(srtContent: string): SrtSegment[] {
     const normalised = srtContent.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const blocks = normalised.trim().split(/\n{2,}/);
 
-    // ASS header — NO // comments inside sections (ASS only allows ; comments)
-    // BorderStyle=3  → opaque box drawn behind text (solid black background)
-    // BackColour=&H00000000 → fully opaque black (AA=00 means opaque in ASS)
-    // PrimaryColour=&H00FFFFFF → solid white text
-    // Bold=-1 (true) → heavier weight, easier to read over video
-    // Alignment=2 → bottom-center
-    const header = `[Script Info]
-ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,36,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,1,0,2,20,20,60,0
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-`;
-
-    function toAssTime(srt: string): string {
-        // SRT: 00:00:01,000  →  ASS: 0:00:01.00
-        const clean = srt.trim();
+    function srtTimeToSec(t: string): number {
+        const clean = t.trim();
         const commaIdx = clean.lastIndexOf(",");
         const hms = clean.slice(0, commaIdx);
-        const ms = clean.slice(commaIdx + 1);
-        const [h, m, s] = hms.split(":");
-        const cs = Math.floor(Number(ms) / 10).toString().padStart(2, "0");
-        return `${Number(h)}:${m.padStart(2,"0")}:${s.padStart(2,"0")}.${cs}`;
+        const ms = Number(clean.slice(commaIdx + 1));
+        const [h, m, s] = hms.split(":").map(Number);
+        return h * 3600 + m * 60 + s + ms / 1000;
     }
 
-    const blocks = normalised.trim().split(/\n{2,}/);
-    const events = blocks.map((block) => {
+    const segments: SrtSegment[] = [];
+    for (const block of blocks) {
         const lines = block.trim().split("\n").map(l => l.trim()).filter(Boolean);
-        if (lines.length < 3) return "";
-        // lines[0] = sequence number, lines[1] = timestamps, lines[2+] = text
+        if (lines.length < 3) continue;
         const timeLine = lines[1];
-        if (!timeLine.includes("-->")) return "";
+        if (!timeLine.includes("-->")) continue;
         const arrowIdx = timeLine.indexOf("-->");
-        const startRaw = timeLine.slice(0, arrowIdx).trim();
-        const endRaw = timeLine.slice(arrowIdx + 3).trim();
-        // Join multi-line subtitle text, escape ASS special chars
-        const text = lines
-            .slice(2)
-            .join("\\N")
-            .replace(/\{/g, "\\{")   // escape ASS override tags
-            .replace(/\}/g, "\\}");
-        const start = toAssTime(startRaw);
-        const end = toAssTime(endRaw);
-        return `Dialogue: 0,${start},${end},Default,,0,0,0,,${text}`;
-    }).filter(Boolean);
-
-    return header + events.join("\n") + "\n";
+        const start = srtTimeToSec(timeLine.slice(0, arrowIdx));
+        const end = srtTimeToSec(timeLine.slice(arrowIdx + 3));
+        // Join multi-line text with a space for drawtext (single-line rendering)
+        const text = lines.slice(2).join(" ");
+        segments.push({ start, end, text });
+    }
+    return segments;
 }
 
 /**
- * Burn subtitles from an SRT file into a video and save as a new file.
- * Returns the path to the output file.
+ * Escape text for use inside ffmpeg's drawtext `text=` value.
+ *
+ * ffmpeg drawtext escaping rules (we are NOT in a shell — fluent-ffmpeg uses
+ * child_process.spawn so no shell quoting is needed; only ffmpeg-level escaping):
+ *   \  →  \\       (backslash)
+ *   '  →  \'       (single quote — drawtext text option delimiter)
+ *   :  →  \:       (colon — ffmpeg option separator)
+ *   %  →  \%       (percent — drawtext expansion)
+ */
+function escapeDrawtext(text: string): string {
+    return text
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/:/g, "\\:")
+        .replace(/%/g, "\\%");
+}
+
+/**
+ * Build a chained `drawtext` filter string for all subtitle segments.
+ *
+ * Each segment renders white bold text on an opaque black background box,
+ * centered horizontally, positioned 55px from the bottom — matching the
+ * website's live subtitle overlay exactly.
+ *
+ * No fontfile/fontsdir needed: ffmpeg's built-in FreeType glyph renderer
+ * supplies a default monospace fallback when fontfile is omitted.
+ */
+function buildDrawtextFilter(segments: SrtSegment[]): string {
+    return segments.map(seg => {
+        const t = escapeDrawtext(seg.text);
+        // x centers the text box; y positions it near the bottom
+        return (
+            `drawtext=text='${t}'` +
+            `:enable='between(t,${seg.start.toFixed(3)},${seg.end.toFixed(3)})'` +
+            `:fontcolor=white` +
+            `:fontsize=36` +
+            `:box=1` +
+            `:boxcolor=black@1.0` +
+            `:boxborderw=12` +
+            `:x=(w-text_w)/2` +
+            `:y=h-text_h-55` +
+            `:line_spacing=4`
+        );
+    }).join(",");
+}
+
+/**
+ * Burn subtitles from an SRT file into a video using ffmpeg's drawtext filter.
+ *
+ * drawtext uses FreeType directly — no libass, no system fonts, works on
+ * every serverless platform including Vercel Lambda.
+ *
+ * Returns the path to the output MP4 file.
  */
 export async function burnSubtitles(videoPath: string, srtPath: string): Promise<string> {
     ensureFfmpegConfigured();
     const id = Date.now();
     const outputPath = path.join(os.tmpdir(), `cap${id}.mp4`);
 
-    // Convert SRT → ASS with embedded style so libass doesn't need system font files.
     const srtContent = fs.readFileSync(srtPath, "utf-8");
-    const assContent = srtToAss(srtContent);
-    const assPath = path.join(os.tmpdir(), `sub${id}.ass`);
-    fs.writeFileSync(assPath, assContent, "utf-8");
-    console.log("[ffmpeg] assPath:", assPath, "| size:", assContent.length, "bytes");
-    // Log first 400 chars so we can verify the header is correct in production logs
-    console.log("[ffmpeg] ASS preview:\n" + assContent.slice(0, 400));
+    const segments = parseSrt(srtContent);
+    console.log(`[ffmpeg] parsed ${segments.length} subtitle segments from SRT`);
 
-    // Build the filter string — path escaping varies by platform
-    let assFilterPath: string;
-    if (process.platform === "win32") {
-        // Windows: convert backslashes and escape drive-letter colon
-        assFilterPath = assPath.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "$1\\:");
-    } else {
-        // Linux / Lambda: /tmp/sub....ass — no special escaping needed
-        assFilterPath = assPath;
+    if (segments.length === 0) {
+        // Nothing to burn — copy the video as-is
+        console.warn("[ffmpeg] no subtitle segments found — copying video without subtitles");
+        return new Promise((resolve, reject) => {
+            ffmpeg(videoPath)
+                .outputOptions(["-c", "copy"])
+                .on("end", () => resolve(outputPath))
+                .on("error", (err: Error) => reject(new Error(`FFmpeg copy error: ${err.message}`)))
+                .save(outputPath);
+        });
     }
-    // Escape single quotes in the path (unusual but safe)
-    const escapedPath = assFilterPath.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-    const vfFilter = `ass='${escapedPath}'`;
 
-    console.log("[ffmpeg] platform:", process.platform);
-    console.log("[ffmpeg] vfFilter:", vfFilter);
-    console.log("[ffmpeg] input:", videoPath, "| output:", outputPath);
+    const filterStr = buildDrawtextFilter(segments);
+    console.log("[ffmpeg] drawtext filter length:", filterStr.length, "chars");
+    console.log("[ffmpeg] filter preview:", filterStr.slice(0, 200) + "…");
 
     return new Promise((resolve, reject) => {
         ffmpeg(videoPath)
-            .outputOptions([
+            // -vf must be passed as TWO separate arguments to avoid shell-quoting
+            // issues.  fluent-ffmpeg spawn escapes each arg individually.
+            .addOptions(["-vf", filterStr])
+            .addOptions([
                 "-c:v", "libx264",
                 "-crf", "20",
                 "-preset", "veryfast",
                 "-c:a", "copy",
+                "-y",
             ])
-            .videoFilters(vfFilter)
-            .on("start", (cmd: string) => console.log("[ffmpeg] cmd:", cmd))
+            .on("start", (cmd: string) =>
+                console.log("[ffmpeg] spawn:", cmd.slice(0, 300))
+            )
             .on("end", () => {
-                cleanupTempFile(assPath);
                 console.log("[ffmpeg] burn complete →", outputPath);
                 resolve(outputPath);
             })
             .on("error", (err: Error, _stdout?: unknown, stderr?: unknown) => {
                 console.error("[ffmpeg] BURN ERROR:", err.message);
                 console.error("[ffmpeg] stderr:", String(stderr ?? "").slice(0, 1000));
-                cleanupTempFile(assPath);
-                reject(new Error(`FFmpeg burn error: ${err.message}\n${String(stderr ?? "").slice(0, 500)}`));
+                reject(
+                    new Error(
+                        `FFmpeg burn error: ${err.message}\n${String(stderr ?? "").slice(0, 500)}`
+                    )
+                );
             })
             .save(outputPath);
     });
