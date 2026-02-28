@@ -142,6 +142,7 @@ const Hero = () => {
     // State
     const fileInputRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
+    const videoPaneRef = useRef<HTMLDivElement>(null);
     // Guard flag: prevents onBlur from auto-saving when a split is in progress
     const splitInProgressRef = useRef(false);
     const [appState, setAppState] = useState<"idle" | "ready" | "processing" | "done" | "error">("idle");
@@ -170,6 +171,11 @@ const Hero = () => {
     const [burnPct, setBurnPct] = useState<number>(0);
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+    // Video natural aspect ratio + rendered pane height — used to constrain
+    // the subtitle overlay to the actual video content bounds (important for
+    // portrait/reel/shorts videos which are narrower than the container)
+    const [videoAspect, setVideoAspect] = useState<number | null>(null);
+    const [videoPaneHeight, setVideoPaneHeight] = useState<number>(480);
 
     // Auto-delete from R2 after 30 min — gives users time to edit subtitles and download
     useEffect(() => {
@@ -821,21 +827,43 @@ const Hero = () => {
                                         className="flex-1 flex flex-col lg:flex-row overflow-hidden"
                                     >
                                         {/* Video pane with custom subtitle overlay */}
-                                        <div className="flex-1 bg-black flex items-center justify-center min-h-[260px] lg:min-h-0 relative">
+                                        <div ref={videoPaneRef} className="flex-1 bg-black flex items-center justify-center min-h-[260px] lg:min-h-0 relative">
                                             <video
                                                 ref={videoRef}
                                                 src={videoUrl}
                                                 controls
                                                 onTimeUpdate={handleTimeUpdate}
+                                                onLoadedMetadata={() => {
+                                                    if (videoRef.current) {
+                                                        const nw = videoRef.current.videoWidth;
+                                                        const nh = videoRef.current.videoHeight;
+                                                        if (nw && nh) setVideoAspect(nw / nh);
+                                                    }
+                                                    if (videoPaneRef.current) {
+                                                        setVideoPaneHeight(videoPaneRef.current.clientHeight || 480);
+                                                    }
+                                                }}
                                                 className="w-full h-full max-h-[480px] object-contain"
                                             />
-                                            {activeSubtitle && (
-                                                <div className="absolute bottom-20 left-0 right-0 flex justify-center px-6 pointer-events-none">
-                                                    <span className="bg-black/80 text-white text-sm md:text-base px-4 py-1.5 rounded-md text-center leading-snug shadow-lg whitespace-normal break-words max-w-[calc(100%-48px)]">
-                                                        {activeSubtitle}
-                                                    </span>
-                                                </div>
-                                            )}
+                                            {activeSubtitle && (() => {
+                                                // For portrait videos (reels/shorts), the rendered video
+                                                // is narrower than the container — constrain the subtitle
+                                                // to the actual video content width.
+                                                const isPortrait = videoAspect !== null && videoAspect < 1;
+                                                const renderedW = isPortrait
+                                                    ? Math.floor(videoPaneHeight * videoAspect!) // object-contain rendered width
+                                                    : undefined;
+                                                return (
+                                                    <div className="absolute bottom-14 left-0 right-0 flex justify-center pointer-events-none px-2">
+                                                        <span
+                                                            className="bg-black/70 text-white text-[11px] font-medium px-2.5 py-1 rounded text-center leading-snug break-words"
+                                                            style={{ maxWidth: renderedW ? `${renderedW - 16}px` : 'calc(min(100% - 16px, 480px))' }}
+                                                        >
+                                                            {activeSubtitle}
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
 
                                         {/* Subtitles pane */}
