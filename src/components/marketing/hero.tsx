@@ -3,7 +3,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Wrapper from '../global/wrapper';
 import { Button } from '../ui/button';
-import { ArrowRightIcon, Loader2Icon, CheckCircle2Icon, DownloadIcon, RotateCcwIcon, FileVideoIcon, XCircleIcon, PlayCircleIcon, UploadCloudIcon, Edit3Icon, SaveIcon, X as XIcon } from 'lucide-react';
+import { ArrowRightIcon, Loader2Icon, CheckCircle2Icon, DownloadIcon, RotateCcwIcon, FileVideoIcon, XCircleIcon, PlayCircleIcon, UploadCloudIcon, SaveIcon, X as XIcon, GripVerticalIcon } from 'lucide-react';
 import { motion, useMotionValue, AnimatePresence } from 'motion/react';
 import { cn } from '@/utils';
 import Balancer from 'react-wrap-balancer';
@@ -166,6 +166,8 @@ const Hero = () => {
     const [burningCaptioned, setBurningCaptioned] = useState(false);
     const [burnPhase, setBurnPhase] = useState<string>("");
     const [burnPct, setBurnPct] = useState<number>(0);
+    const [dragIndex, setDragIndex] = useState<number | null>(null);
+    const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
     // Auto-delete from R2 after 30 min — gives users time to edit subtitles and download
     useEffect(() => {
@@ -451,6 +453,38 @@ const Hero = () => {
         setLastEdit(null);
         setToastVisible(false);
     }, [lastEdit, persistSubtitles]);
+
+    // ── Drag-to-reorder ───────────────────────────────────────────────────────
+    const handleDragStart = useCallback((index: number) => {
+        setDragIndex(index);
+    }, []);
+
+    const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+        e.preventDefault();
+        setDragOverIndex(index);
+    }, []);
+
+    const handleDrop = useCallback(async (targetIndex: number) => {
+        if (dragIndex === null || dragIndex === targetIndex) {
+            setDragIndex(null);
+            setDragOverIndex(null);
+            return;
+        }
+        const reordered = [...segments];
+        const [moved] = reordered.splice(dragIndex, 1);
+        reordered.splice(targetIndex, 0, moved);
+        setSegments(reordered);
+        setSrtContent(buildSrtFromSegments(reordered));
+        setVttUrl(URL.createObjectURL(new Blob([buildVttFromSegments(reordered)], { type: 'text/vtt' })));
+        setDragIndex(null);
+        setDragOverIndex(null);
+        await persistSubtitles(reordered);
+    }, [dragIndex, segments, persistSubtitles]);
+
+    const handleDragEnd = useCallback(() => {
+        setDragIndex(null);
+        setDragOverIndex(null);
+    }, []);
 
     const stepIndex = (s: ProcessingStep) => STEPS.findIndex(x => x.key === s);
     const currentStepIndex = stepIndex(processingStep);
@@ -819,73 +853,100 @@ const Hero = () => {
                                                 {segments.length === 0 ? (
                                                     <p className="text-xs text-muted-foreground p-4 text-center">No speech detected.</p>
                                                 ) : (
-                                                    segments.map((seg) => {
+                                                    segments.map((seg, segIdx) => {
                                                         const isEditing = editingSegmentId === seg.id;
                                                         const isTimeEditing = editingTimeSegmentId === seg.id;
+                                                        const isDraggingThis = dragIndex === segIdx;
+                                                        const isDragOver = dragOverIndex === segIdx;
                                                         return (
-                                                            <div key={seg.id} className="group relative flex items-start gap-2 px-4 py-2.5">
-                                                                <span className="text-xs text-muted-foreground/50 font-mono mt-0.5 shrink-0 w-12">
-                                                                    {formatTime(seg.start)}
-                                                                </span>
-                                                                <div className="flex-1">
-                                                                    {isEditing ? (
-                                                                        <div className="flex items-start gap-2">
-                                                                            <textarea
-                                                                                autoFocus
-                                                                                value={editText}
-                                                                                onChange={(e) => setEditText(e.target.value)}
-                                                                                onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); saveEdit(seg.id); } }}
-                                                                                onBlur={() => { saveEdit(seg.id); }}
-                                                                                className="w-full text-xs p-2 rounded-md border border-foreground/10 resize-none"
-                                                                                rows={2}
-                                                                            />
-                                                                            <div className="flex flex-col gap-1 ml-2">
-                                                                                <button onClick={() => saveEdit(seg.id)} disabled={savingEdit} className="p-1 bg-primary/10 rounded-md text-primary hover:bg-primary/20">
-                                                                                    <SaveIcon className="size-3" />
-                                                                                </button>
-                                                                                <button onClick={cancelEdit} className="p-1 bg-transparent rounded-md text-muted-foreground hover:text-foreground">
-                                                                                    <XIcon className="size-3" />
-                                                                                </button>
+                                                            <div
+                                                                key={seg.id}
+                                                                draggable={!isEditing && !isTimeEditing}
+                                                                onDragStart={() => handleDragStart(segIdx)}
+                                                                onDragOver={(e) => handleDragOver(e, segIdx)}
+                                                                onDrop={() => handleDrop(segIdx)}
+                                                                onDragEnd={handleDragEnd}
+                                                                className={cn(
+                                                                    "group relative flex items-start gap-2 px-3 py-2.5 transition-all duration-150",
+                                                                    isDraggingThis && "opacity-40",
+                                                                    isDragOver && !isDraggingThis && "border-t-2 border-primary",
+                                                                    !isEditing && !isTimeEditing && "hover:bg-foreground/[0.03] cursor-grab active:cursor-grabbing",
+                                                                )}
+                                                            >
+                                                                {/* Drag handle — always visible on hover */}
+                                                                <GripVerticalIcon className="size-3 mt-1 shrink-0 text-muted-foreground/20 group-hover:text-muted-foreground/50 transition-colors" />
+
+                                                                {/* Timestamp — click to edit time */}
+                                                                {isTimeEditing ? (
+                                                                    <div className="flex flex-col gap-2 flex-1">
+                                                                        <div className="flex items-center gap-2 w-full flex-wrap">
+                                                                            <div className="flex items-center gap-1">
+                                                                                <button onClick={() => adjustTimeText(true, -0.1)} title="-0.1s" className="text-xs px-1.5 py-0.5 rounded bg-foreground/5 hover:bg-foreground/10">-</button>
+                                                                                <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded border border-foreground/10 w-[4.5rem] font-mono" />
+                                                                                <button onClick={() => adjustTimeText(true, 0.1)} title="+0.1s" className="text-xs px-1.5 py-0.5 rounded bg-foreground/5 hover:bg-foreground/10">+</button>
+                                                                            </div>
+                                                                            <span className="text-xs text-muted-foreground">→</span>
+                                                                            <div className="flex items-center gap-1">
+                                                                                <button onClick={() => adjustTimeText(false, -0.1)} title="-0.1s" className="text-xs px-1.5 py-0.5 rounded bg-foreground/5 hover:bg-foreground/10">-</button>
+                                                                                <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded border border-foreground/10 w-[4.5rem] font-mono" />
+                                                                                <button onClick={() => adjustTimeText(false, 0.1)} title="+0.1s" className="text-xs px-1.5 py-0.5 rounded bg-foreground/5 hover:bg-foreground/10">+</button>
                                                                             </div>
                                                                         </div>
-                                                                    ) : isTimeEditing ? (
-                                                                        <div className="flex flex-col gap-2">
-                                                                            <div className="flex items-center gap-2 w-full">
-                                                                                                                                                    <div className="flex items-center gap-1">
-                                                                                                                                                        <button onClick={() => adjustTimeText(true, -0.1)} title="-0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">-</button>
-                                                                                                                                                        <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-20" />
-                                                                                                                                                        <button onClick={() => adjustTimeText(true, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
-                                                                                                                                                    </div>
-                                                                                <span className="text-xs text-muted-foreground">→</span>
-                                                                                <div className="flex items-center gap-1">
-                                                                                    <button onClick={() => adjustTimeText(false, -0.1)} title="-0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">-</button>
-                                                                                        <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded-md border border-foreground/10 w-20" />
-                                                                                        <button onClick={() => adjustTimeText(false, 0.1)} title="+0.1s" className="text-xs px-2 py-0.5 rounded-md bg-foreground/5">+</button>
-                                                                                </div>
-                                                                            </div>
-                                                                            <div className="flex items-center gap-2">
-                                                                                <button onClick={() => saveEditTime(seg.id)} title="Save time" className="p-1 bg-primary/10 rounded-md">
-                                                                                    <SaveIcon className="size-4" />
-                                                                                </button>
-                                                                                <button onClick={cancelEditTime} title="Cancel" className="p-1 bg-transparent rounded-md">
-                                                                                    <XIcon className="size-4" />
-                                                                                </button>
-                                                                            </div>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <button onClick={() => saveEditTime(seg.id)} title="Save" className="p-1 bg-primary/10 hover:bg-primary/20 rounded text-primary">
+                                                                                <SaveIcon className="size-3" />
+                                                                            </button>
+                                                                            <button onClick={cancelEditTime} title="Cancel" className="p-1 rounded text-muted-foreground hover:text-foreground">
+                                                                                <XIcon className="size-3" />
+                                                                            </button>
                                                                         </div>
-                                                                    ) : (
-                                                                        <div className="flex items-start justify-between">
-                                                                            <p className="text-xs text-foreground/90 leading-relaxed">{seg.text}</p>
-                                                                            <div className="flex items-center gap-2">
-                                                                                <button onClick={() => startEdit(seg)} title="Edit subtitle" className="opacity-0 group-hover:opacity-100 transition-opacity ml-3 text-muted-foreground hover:text-foreground">
-                                                                                    <Edit3Icon className="size-4" />
-                                                                                </button>
-                                                                                <button onClick={() => startEditTime(seg)} title="Edit times" className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground text-xs px-2 py-0.5 rounded-md">
-                                                                                    ⏱️
-                                                                                </button>
-                                                                            </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        {/* Timestamp pill — hover underline signals it's clickable */}
+                                                                        <span
+                                                                            className="text-xs text-muted-foreground/50 font-mono mt-0.5 shrink-0 w-12 cursor-pointer hover:text-primary hover:underline decoration-dotted transition-colors"
+                                                                            title="Click to edit timing"
+                                                                            onClick={() => !isEditing && startEditTime(seg)}
+                                                                        >
+                                                                            {formatTime(seg.start)}
+                                                                        </span>
+
+                                                                        {/* Text — click anywhere to edit inline */}
+                                                                        <div className="flex-1 min-w-0">
+                                                                            {isEditing ? (
+                                                                                <textarea
+                                                                                    autoFocus
+                                                                                    value={editText}
+                                                                                    onChange={(e) => setEditText(e.target.value)}
+                                                                                    onKeyDown={(e) => {
+                                                                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                                                                            e.preventDefault();
+                                                                                            // Save and jump to next segment
+                                                                                            const nextSeg = segments[segIdx + 1] ?? null;
+                                                                                            saveEdit(seg.id).then(() => {
+                                                                                                if (nextSeg) window.setTimeout(() => startEdit(nextSeg), 0);
+                                                                                            });
+                                                                                        } else if (e.key === 'Escape') {
+                                                                                            cancelEdit();
+                                                                                        }
+                                                                                    }}
+                                                                                    onBlur={() => saveEdit(seg.id)}
+                                                                                    className="w-full text-xs p-1 rounded border border-primary/40 resize-none bg-background focus:outline-none focus:ring-1 focus:ring-primary/30"
+                                                                                    rows={2}
+                                                                                />
+                                                                            ) : (
+                                                                                <p
+                                                                                    className="text-xs text-foreground/90 leading-relaxed rounded px-1.5 py-0.5 -mx-1.5 cursor-text group-hover:bg-foreground/5 hover:!bg-foreground/10 transition-colors select-none"
+                                                                                    title="Click to edit"
+                                                                                    onClick={() => startEdit(seg)}
+                                                                                >
+                                                                                    {seg.text}
+                                                                                </p>
+                                                                            )}
                                                                         </div>
-                                                                    )}
-                                                                </div>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         );
                                                     })
