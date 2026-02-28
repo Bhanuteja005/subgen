@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
     try {
         const stream = await getObjectStream(key);
-        if (!stream) return NextResponse.json({ error: "File not found" }, { status: 404 });
+        if (!stream) return NextResponse.json({ error: "File not found — it may have expired. Please re-upload." }, { status: 404 });
 
         const filename = key.split("/").pop() ?? "video.mp4";
 
@@ -39,8 +39,19 @@ export async function GET(req: NextRequest) {
                 "Cache-Control": "no-store",
             },
         });
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error("[download-video] error", err);
-        return NextResponse.json({ error: err?.message ?? "Download failed" }, { status: 500 });
+        // NoSuchKey = the file was deleted (auto-expiry) or never existed
+        const code = (err as { Code?: string; name?: string })?.Code ?? (err as { name?: string })?.name ?? "";
+        if (code === "NoSuchKey" || code === "NotFound") {
+            return NextResponse.json(
+                { error: "Video has expired — please re-upload your file and regenerate subtitles." },
+                { status: 404 },
+            );
+        }
+        return NextResponse.json(
+            { error: (err as Error)?.message ?? "Download failed" },
+            { status: 500 },
+        );
     }
 }

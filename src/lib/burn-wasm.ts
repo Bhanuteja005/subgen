@@ -97,7 +97,12 @@ export async function burnSubtitlesWasm(
         `/api/download-video?key=${encodeURIComponent(videoKey)}`,
     );
     if (!videoRes.ok) {
-        throw new Error(`Video download failed (${videoRes.status})`);
+        let detail = `Video download failed (${videoRes.status})`;
+        try {
+            const body = await videoRes.json();
+            if (body?.error) detail = body.error;
+        } catch { /* non-JSON body */ }
+        throw new Error(detail);
     }
     const videoData = await videoRes.arrayBuffer();
     onProgress?.("Downloading video…", 100);

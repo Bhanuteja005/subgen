@@ -167,12 +167,12 @@ const Hero = () => {
     const [burnPhase, setBurnPhase] = useState<string>("");
     const [burnPct, setBurnPct] = useState<number>(0);
 
-    // Auto-delete from R2 after 5 min
+    // Auto-delete from R2 after 30 min — gives users time to edit subtitles and download
     useEffect(() => {
         if (!videoKey) return;
         const t = setTimeout(async () => {
             try { await fetch("/api/delete", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: videoKey }) }); } catch { /* noop */ }
-        }, 5 * 60 * 1000);
+        }, 30 * 60 * 1000);
         return () => clearTimeout(t);
     }, [videoKey]);
 
