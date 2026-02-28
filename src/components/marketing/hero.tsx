@@ -834,7 +834,6 @@ const Hero = () => {
                                     </motion.div>
                                 )}
 
-                                {/* ── DONE: video player + subtitles ── */}
                                 {appState === "done" && videoUrl && (
                                     <motion.div
                                         key="done"
