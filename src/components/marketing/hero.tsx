@@ -993,7 +993,6 @@ const Hero = () => {
                                                                             {formatTime(seg.start)}
                                                                         </span>
 
-                                                                        {/* Text — click anywhere to edit inline */}
                                                                         <div className="flex-1 min-w-0">
                                                                             {isEditing ? (
                                                                                 <textarea
