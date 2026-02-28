@@ -3,7 +3,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import Wrapper from '../global/wrapper';
 import { Button } from '../ui/button';
-import { ArrowRightIcon, Loader2Icon, CheckCircle2Icon, DownloadIcon, RotateCcwIcon, FileVideoIcon, XCircleIcon, PlayCircleIcon, UploadCloudIcon, SaveIcon, X as XIcon, GripVerticalIcon } from 'lucide-react';
+import { ArrowRightIcon, Loader2Icon, CheckCircle2Icon, DownloadIcon, RotateCcwIcon, XCircleIcon, UploadCloudIcon, SaveIcon, X as XIcon, GripVerticalIcon } from 'lucide-react';
 import { motion, useMotionValue, AnimatePresence } from 'motion/react';
 import { cn } from '@/utils';
 import Balancer from 'react-wrap-balancer';
@@ -204,9 +204,9 @@ const Hero = () => {
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const f = e.target.files?.[0]; if (f) handleFileChosen(f);
     };
-    const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
-    const handleDragLeave = () => setIsDragging(false);
-    const handleDrop = (e: React.DragEvent) => {
+    const handleFileDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); };
+    const handleFileDragLeave = () => setIsDragging(false);
+    const handleFileDrop = (e: React.DragEvent) => {
         e.preventDefault(); setIsDragging(false);
         const f = e.dataTransfer.files?.[0]; if (f) handleFileChosen(f);
     };
@@ -626,9 +626,9 @@ const Hero = () => {
                                 "rounded-lg md:rounded-[24px] border border-foreground/10 bg-background overflow-hidden",
                                 "min-h-[300px] lg:min-h-[480px] flex flex-col"
                             )}
-                            onDragOver={handleDragOver}
-                            onDragLeave={handleDragLeave}
-                            onDrop={handleDrop}
+                            onDragOver={handleFileDragOver}
+                            onDragLeave={handleFileDragLeave}
+                            onDrop={handleFileDrop}
                         >
                             <AnimatePresence mode="wait">
 
@@ -791,17 +791,7 @@ const Hero = () => {
                                                     >
                                                         <DownloadIcon className="size-3" />SRT
                                                     </Button>
-                                                    {teluguSrtContent && (
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            className="h-7 text-xs px-2 gap-1"
-                                                            title="Download Telugu script subtitles"
-                                                            onClick={() => downloadSrt(teluguSrtContent, (selectedFile?.name ?? "video") + "_telugu")}
-                                                        >
-                                                            <DownloadIcon className="size-3" />తెలుగు
-                                                        </Button>
-                                                    )}
+                                                    
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
