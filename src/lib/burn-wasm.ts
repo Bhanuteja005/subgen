@@ -1,65 +1,127 @@
 /**
  * Client-side subtitle burning using @ffmpeg/ffmpeg (WebAssembly).
  *
- * Uses single-thread core (no SharedArrayBuffer required) → no COOP/COEP
- * headers needed → safe with Vercel and R2 presigned URLs.
+ * Rendering approach: `drawtext` filter (FreeType, bundled in @ffmpeg/core).
  *
- * Subtitle rendering:
- *   Uses `subtitles=subs.srt:fontsdir=/fonts` — libass native SRT parsing
- *   with an explicit font directory written into the wasm virtual FS.
- *   This bypasses fontconfig entirely and works inside the wasm sandbox.
- *   Previous approach (chained drawtext filters) produced corrupted output
- *   on longer videos because the massive filter string caused silent encode
- *   failures in the wasm encoder.
+ * Why NOT `subtitles=` (libass):
+ *   @ffmpeg/core@0.12.x does NOT include libass, so the `subtitles` filter
+ *   silently re-encodes the video with no text rendered at all.
+ *
+ * Why drawtext works:
+ *   FreeType IS compiled into @ffmpeg/core. We supply an explicit TTF file
+ *   via fontfile= pointing at the wasm virtual FS — no fontconfig needed.
+ *
+ * DataCloneError fix:
+ *   ffmpeg.wasm transfers (detaches) Uint8Array buffers via postMessage when
+ *   writing to the virtual FS. The module-level font cache must never hand the
+ *   SAME buffer to writeFile twice — we always pass `.slice()` copies.
  */
 
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { toBlobURL } from "@ffmpeg/util";
 
-// @ffmpeg/core single-thread UMD build (no SharedArrayBuffer / COOP needed)
 const CORE_VERSION = "0.12.6";
 const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
-
-// Font served from our own public/ — never 404, no CORS issues
 const FONT_URL = "/fonts/subtitle.ttf";
 
 // ── Module-level caches ────────────────────────────────────────────────────────
 
 let _ffmpegInstance: FFmpeg | null = null;
 let _loadPromise: Promise<FFmpeg> | null = null;
-let _fontBytes: Uint8Array | null = null;
+/** Cached font bytes — NEVER passed directly to writeFile; always .slice() first. */
+let _fontCache: Uint8Array | null = null;
 
-// ── Font loader ────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 async function getFontBytes(): Promise<Uint8Array> {
-    if (_fontBytes) return _fontBytes;
+    if (_fontCache) return _fontCache;
     const res = await fetch(FONT_URL);
     if (!res.ok) throw new Error(`Failed to load subtitle font (${res.status})`);
-    _fontBytes = new Uint8Array(await res.arrayBuffer());
-    return _fontBytes;
+    _fontCache = new Uint8Array(await res.arrayBuffer());
+    return _fontCache;
+}
+
+/**
+ * Escape text for ffmpeg drawtext `text='...'` (single-quoted filter value).
+ *   \  →  \\     '  →  \'     :  →  \:     %  →  %%
+ */
+function escapeDrawtext(raw: string): string {
+    return raw
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/:/g, "\\:")
+        .replace(/%/g, "%%")
+        .replace(/<[^>]+>/g, "")    // strip HTML tags
+        .replace(/\r?\n/g, " ")     // flatten multi-line cues
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+/** Parse SRT timestamp (HH:MM:SS,mmm or HH:MM:SS.mmm) → seconds */
+function parseSrtTime(ts: string): number {
+    const [hms, frac = "0"] = ts.trim().replace(",", ".").split(".");
+    const [h = 0, m = 0, s = 0] = hms.split(":").map(Number);
+    return h * 3600 + m * 60 + s + Number(frac) / Math.pow(10, frac.length);
+}
+
+/**
+ * Convert SRT text → ffmpeg -vf filter string.
+ * One drawtext segment per cue, gated by enable='between(t,start,end)'.
+ * Style: 16px white text, semi-transparent black box, 50px above bottom.
+ */
+function buildVfFilter(srt: string): string {
+    const blocks = srt.trim().split(/\r?\n\r?\n+/);
+    const parts: string[] = [];
+
+    for (const block of blocks) {
+        const lines = block.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+        if (lines.length < 2) continue;
+        const tIdx = lines.findIndex(l => l.includes("-->"));
+        if (tIdx < 0) continue;
+        const m = lines[tIdx].match(/(\d+:\d+:\d+[,.]\d+)\s*-->\s*(\d+:\d+:\d+[,.]\d+)/);
+        if (!m) continue;
+        const start = parseSrtTime(m[1]);
+        const end = parseSrtTime(m[2]);
+        const text = escapeDrawtext(lines.slice(tIdx + 1).join(" "));
+        if (!text) continue;
+
+        parts.push(
+            `drawtext=fontfile='/font.ttf'` +
+            `:text='${text}'` +
+            `:fontsize=16` +
+            `:fontcolor=white` +
+            `:box=1` +
+            `:boxcolor=black@0.75` +
+            `:boxborderw=6` +
+            `:x=(w-text_w)/2` +
+            `:y=h-text_h-50` +
+            `:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'`
+        );
+    }
+
+    if (parts.length === 0) throw new Error("No subtitle cues found in SRT.");
+    return parts.join(",");
 }
 
 // ── FFmpeg singleton ───────────────────────────────────────────────────────────
 
-async function getFFmpeg(onLoadProgress?: (pct: number) => void): Promise<FFmpeg> {
+async function getFFmpeg(onProgress?: (pct: number) => void): Promise<FFmpeg> {
     if (_ffmpegInstance) return _ffmpegInstance;
     if (_loadPromise) return _loadPromise;
 
     _loadPromise = (async () => {
         const ff = new FFmpeg();
-        ff.on("log", ({ message }: { message: string }) => {
-            console.debug("[ffmpeg-wasm]", message);
-        });
-
-        onLoadProgress?.(5);
+        ff.on("log", ({ message }: { message: string }) =>
+            console.debug("[ffmpeg-wasm]", message)
+        );
+        onProgress?.(5);
         const [coreURL, wasmURL] = await Promise.all([
             toBlobURL(`${CORE_BASE}/ffmpeg-core.js`, "text/javascript"),
             toBlobURL(`${CORE_BASE}/ffmpeg-core.wasm`, "application/wasm"),
         ]);
-        onLoadProgress?.(30);
+        onProgress?.(30);
         await ff.load({ coreURL, wasmURL });
-        onLoadProgress?.(100);
-
+        onProgress?.(100);
         _ffmpegInstance = ff;
         return ff;
     })();
@@ -78,79 +140,51 @@ export function resetFFmpegInstance(): void {
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
-/**
- * Burns SRT subtitles into a video in the browser using ffmpeg.wasm.
- *
- * Flow:
- *  1. Fetch source video (/api/download-video) + font in parallel.
- *  2. Load @ffmpeg/core wasm singleton (cached after first call, ~30 MB).
- *  3. Write /input.mp4, /fonts/subtitle.ttf, /subs.srt into the wasm FS.
- *  4. ffmpeg -i /input.mp4
- *           -vf subtitles=/subs.srt:fontsdir=/fonts:force_style='...'
- *           -c:v libx264 -preset ultrafast -crf 23 -c:a copy /output.mp4
- *  5. Read output blob → trigger browser download.
- */
 export async function burnSubtitlesWasm(
     videoKey: string,
     srtContent: string,
     outputFilename: string,
     onProgress?: (phase: string, pct: number) => void,
 ): Promise<void> {
-    // ── 1. Fetch video + font in parallel ─────────────────────────────────────
+    // 1. Download video + font in parallel ─────────────────────────────────────
     onProgress?.("Downloading…", 0);
     const [videoRes, fontBytes] = await Promise.all([
         fetch(`/api/download-video?key=${encodeURIComponent(videoKey)}`),
         getFontBytes(),
     ]);
-
     if (!videoRes.ok) {
-        let detail = `Video download failed (${videoRes.status})`;
-        try { const b = await videoRes.json(); if (b?.error) detail = b.error; } catch { /* */ }
-        throw new Error(detail);
+        let msg = `Video download failed (${videoRes.status})`;
+        try { const b = await videoRes.json(); if (b?.error) msg = b.error; } catch { /**/ }
+        throw new Error(msg);
     }
-    const videoData = await videoRes.arrayBuffer();
+    const videoBuffer = await videoRes.arrayBuffer();
     onProgress?.("Downloading…", 100);
 
-    // ── 2. Load wasm core ─────────────────────────────────────────────────────
+    // 2. Load wasm core (singleton, cached after first call) ───────────────────
     onProgress?.("Loading encoder…", 0);
-    const ff = await getFFmpeg((pct) => onProgress?.("Loading encoder…", pct));
+    const ff = await getFFmpeg(pct => onProgress?.("Loading encoder…", pct));
 
-    // ── 3. Progress events ────────────────────────────────────────────────────
+    // 3. Build -vf filter string (pure JS) ─────────────────────────────────────
+    const vfFilter = buildVfFilter(srtContent);
+
     const onProg = ({ progress }: { progress: number }) =>
         onProgress?.("Burning subtitles…", Math.min(99, Math.round(progress * 100)));
     ff.on("progress", onProg);
 
     try {
-        // ── 4. Write to wasm FS ───────────────────────────────────────────────
         onProgress?.("Burning subtitles…", 0);
-        // /fonts/ directory so libass can discover the font via fontsdir=
-        try { await ff.createDir("/fonts"); } catch { /* already exists */ }
 
-        await ff.writeFile("/input.mp4", new Uint8Array(videoData));
-        await ff.writeFile("/fonts/subtitle.ttf", fontBytes);
-        await ff.writeFile("/subs.srt", new TextEncoder().encode(srtContent));
+        // CRITICAL: pass .slice() copies — ffmpeg.wasm detaches the source
+        // ArrayBuffer via postMessage transfer. Without slicing, the cached
+        // _fontCache buffer becomes detached → DataCloneError on second call.
+        await ff.writeFile("/input.mp4", new Uint8Array(videoBuffer.slice(0)));
+        await ff.writeFile("/font.ttf", fontBytes.slice());
 
-        // ── 5. Encode ─────────────────────────────────────────────────────────
-        // subtitles filter + explicit fontsdir  →  libass renders without
-        // fontconfig or system fonts (both absent in the wasm sandbox).
-        // force_style: minimal white text, solid black background box, 50px
-        // from the bottom so it clears player control bars.
-        const forceStyle = [
-            "FontSize=16",
-            "PrimaryColour=&H00FFFFFF",    // white text
-            "OutlineColour=&H00000000",    // black outline
-            "BackColour=&HCC000000",       // ~80% black box
-            "BorderStyle=4",               // opaque background box
-            "Outline=1",
-            "Shadow=0",
-            "Bold=0",
-            "Alignment=2",                 // bottom-center
-            "MarginV=50",                  // 50 px above bottom edge
-        ].join(",");
-
+        // drawtext requires video re-encoding (-c:v libx264).
+        // Stream-copying video (-c:v copy) while applying a video filter is invalid.
         const ret = await ff.exec([
             "-i", "/input.mp4",
-            "-vf", `subtitles=/subs.srt:fontsdir=/fonts:force_style='${forceStyle}'`,
+            "-vf", vfFilter,
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-crf", "23",
@@ -159,27 +193,26 @@ export async function burnSubtitlesWasm(
             "/output.mp4",
         ]);
 
-        if (ret !== 0) throw new Error(`FFmpeg exited with code ${ret}`);
+        if (ret !== 0) throw new Error(`FFmpeg encode failed (exit ${ret})`);
 
-        // ── 6. Download ───────────────────────────────────────────────────────
         onProgress?.("Preparing download…", 99);
-        const outputData = (await ff.readFile("/output.mp4")) as Uint8Array;
-        // .slice() creates a new ArrayBuffer copy — required for Blob()
-        const blob = new Blob([outputData.slice()], { type: "video/mp4" });
-        const blobUrl = URL.createObjectURL(blob);
+        const outData = (await ff.readFile("/output.mp4")) as Uint8Array;
+        // slice() yields a plain ArrayBuffer — required for Blob constructor
+        const blob = new Blob([outData.slice()], { type: "video/mp4" });
+        const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = blobUrl;
+        a.href = url;
         a.download = outputFilename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
 
         onProgress?.("Done!", 100);
     } finally {
         ff.off("progress", onProg);
-        for (const f of ["/input.mp4", "/fonts/subtitle.ttf", "/subs.srt", "/output.mp4"]) {
-            try { await ff.deleteFile(f); } catch { /* ignored */ }
+        for (const f of ["/input.mp4", "/font.ttf", "/output.mp4"]) {
+            try { await ff.deleteFile(f); } catch { /**/ }
         }
     }
 }
