@@ -125,10 +125,12 @@ function buildFilter(srt: string): string {
         const text  = sanitise(lines.slice(ti + 1).join(" "));
         if (!text) continue;
 
-        // Note: fontfile path has NO surrounding quotes — the value after '='
-        // is already delimited by the option separator ':'.  Adding extra
-        // single-quotes around the path causes a parse error in the
-        // filter-option parser.
+        // enable=step(t-start)*step(end-t) is equivalent to between(t,start,end)
+        // but contains NO commas, which avoids the filter-chain parser conflict
+        // where commas inside the enable value get mis-read as filter separators.
+        // Single-quoting the enable value does NOT reliably fix that conflict in
+        // @ffmpeg/core@0.12.x (the closing quote still gets consumed before the
+        // chain comma is detected), so we avoid commas entirely.
         segments.push(
             `drawtext=fontfile=font.ttf` +
             `:text='${text}'` +
@@ -139,7 +141,7 @@ function buildFilter(srt: string): string {
             `:boxborderw=6` +
             `:x=(w-text_w)/2` +
             `:y=h-text_h-50` +
-            `:enable='between(t\\,${start.toFixed(3)}\\,${end.toFixed(3)})'`
+            `:enable=step(t-${start.toFixed(3)})*step(${end.toFixed(3)}-t)`
         );
     }
 
