@@ -88,158 +88,67 @@ export function cleanupTempFile(filePath: string): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Subtitle burning — drawtext approach
+// Subtitle embedding — mov_text soft subtitle track (MP4 container)
 //
-// We parse the SRT ourselves and render each segment with ffmpeg's `drawtext`
-// filter.  Unlike `ass` / `subtitles` filters, drawtext uses FreeType directly
-// (no libass, no system font directory) so it works on every platform including
-// Vercel Lambda which has NO system fonts at all.
+// Instead of re-encoding pixels we mux the SRT directly into the MP4 as a
+// closed-caption track (codec: mov_text).  This works on EVERY ffmpeg build
+// because it requires no filters, no libfreetype, no libass — just the core
+// muxer that ships in all builds.
+//
+// Result: the downloaded MP4 has a built-in subtitle track that all common
+// players surface automatically:
+//   • VLC   → always shown (can be toggled)
+//   • QuickTime / macOS player → shown with CC button
+//   • iOS native video player  → shown with CC button (mov_text is the
+//                                  native iOS closed-caption format)
+//   • Windows Movies & TV      → shown as captions
+//   • ffplay / mpv              → shown by default
+//
+// Processing is near-instant (stream copy, no decode/re-encode).
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface SrtSegment {
-    start: number;  // seconds (float)
-    end: number;
-    text: string;   // single line (multi-line joined with " ")
-}
-
-/** Parse an SRT string into timed text segments */
-function parseSrt(srtContent: string): SrtSegment[] {
-    const normalised = srtContent.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const blocks = normalised.trim().split(/\n{2,}/);
-
-    function srtTimeToSec(t: string): number {
-        const clean = t.trim();
-        const commaIdx = clean.lastIndexOf(",");
-        const hms = clean.slice(0, commaIdx);
-        const ms = Number(clean.slice(commaIdx + 1));
-        const [h, m, s] = hms.split(":").map(Number);
-        return h * 3600 + m * 60 + s + ms / 1000;
-    }
-
-    const segments: SrtSegment[] = [];
-    for (const block of blocks) {
-        const lines = block.trim().split("\n").map(l => l.trim()).filter(Boolean);
-        if (lines.length < 3) continue;
-        const timeLine = lines[1];
-        if (!timeLine.includes("-->")) continue;
-        const arrowIdx = timeLine.indexOf("-->");
-        const start = srtTimeToSec(timeLine.slice(0, arrowIdx));
-        const end = srtTimeToSec(timeLine.slice(arrowIdx + 3));
-        // Join multi-line text with a space for drawtext (single-line rendering)
-        const text = lines.slice(2).join(" ");
-        segments.push({ start, end, text });
-    }
-    return segments;
-}
-
 /**
- * Escape text for use inside ffmpeg's drawtext `text=` value.
+ * Embed an SRT subtitle file into an MP4 as a soft subtitle track.
  *
- * ffmpeg drawtext escaping rules (we are NOT in a shell — fluent-ffmpeg uses
- * child_process.spawn so no shell quoting is needed; only ffmpeg-level escaping):
- *   \  →  \\       (backslash)
- *   '  →  \'       (single quote — drawtext text option delimiter)
- *   :  →  \:       (colon — ffmpeg option separator)
- *   %  →  \%       (percent — drawtext expansion)
- */
-function escapeDrawtext(text: string): string {
-    return text
-        .replace(/\\/g, "\\\\")
-        .replace(/'/g, "\\'")
-        .replace(/:/g, "\\:")
-        .replace(/%/g, "\\%");
-}
-
-/**
- * Build a chained `drawtext` filter string for all subtitle segments.
- *
- * Each segment renders white bold text on an opaque black background box,
- * centered horizontally, positioned 55px from the bottom — matching the
- * website's live subtitle overlay exactly.
- *
- * No fontfile/fontsdir needed: ffmpeg's built-in FreeType glyph renderer
- * supplies a default monospace fallback when fontfile is omitted.
- */
-function buildDrawtextFilter(segments: SrtSegment[]): string {
-    return segments.map(seg => {
-        const t = escapeDrawtext(seg.text);
-        // x centers the text box; y positions it near the bottom
-        return (
-            `drawtext=text='${t}'` +
-            `:enable='between(t,${seg.start.toFixed(3)},${seg.end.toFixed(3)})'` +
-            `:fontcolor=white` +
-            `:fontsize=36` +
-            `:box=1` +
-            `:boxcolor=black@1.0` +
-            `:boxborderw=12` +
-            `:x=(w-text_w)/2` +
-            `:y=h-text_h-55` +
-            `:line_spacing=4`
-        );
-    }).join(",");
-}
-
-/**
- * Burn subtitles from an SRT file into a video using ffmpeg's drawtext filter.
- *
- * drawtext uses FreeType directly — no libass, no system fonts, works on
- * every serverless platform including Vercel Lambda.
+ * Uses `mov_text` codec (the MP4-native subtitle format).  No video
+ * re-encoding — every stream is copied as-is.  Works on any ffmpeg build.
  *
  * Returns the path to the output MP4 file.
  */
 export async function burnSubtitles(videoPath: string, srtPath: string): Promise<string> {
     ensureFfmpegConfigured();
-    const id = Date.now();
-    const outputPath = path.join(os.tmpdir(), `cap${id}.mp4`);
+    const outputPath = path.join(os.tmpdir(), `cap${Date.now()}.mp4`);
 
-    const srtContent = fs.readFileSync(srtPath, "utf-8");
-    const segments = parseSrt(srtContent);
-    console.log(`[ffmpeg] parsed ${segments.length} subtitle segments from SRT`);
-
-    if (segments.length === 0) {
-        // Nothing to burn — copy the video as-is
-        console.warn("[ffmpeg] no subtitle segments found — copying video without subtitles");
-        return new Promise((resolve, reject) => {
-            ffmpeg(videoPath)
-                .outputOptions(["-c", "copy"])
-                .on("end", () => resolve(outputPath))
-                .on("error", (err: Error) => reject(new Error(`FFmpeg copy error: ${err.message}`)))
-                .save(outputPath);
-        });
-    }
-
-    const filterStr = buildDrawtextFilter(segments);
-    console.log("[ffmpeg] drawtext filter length:", filterStr.length, "chars");
-    console.log("[ffmpeg] filter preview:", filterStr.slice(0, 200) + "…");
+    console.log("[ffmpeg] embedding SRT as mov_text track");
+    console.log("[ffmpeg] video:", videoPath);
+    console.log("[ffmpeg] srt:  ", srtPath);
+    console.log("[ffmpeg] out:  ", outputPath);
 
     return new Promise((resolve, reject) => {
         ffmpeg(videoPath)
-            // -vf must be passed as TWO separate arguments to avoid shell-quoting
-            // issues.  fluent-ffmpeg spawn escapes each arg individually.
-            .addOptions(["-vf", filterStr])
-            .addOptions([
-                "-c:v", "libx264",
-                "-crf", "20",
-                "-preset", "veryfast",
-                "-c:a", "copy",
-                "-y",
+            .input(srtPath)
+            .outputOptions([
+                "-c:v", "copy",      // copy video stream — no re-encode
+                "-c:a", "copy",      // copy audio stream — no re-encode
+                "-c:s", "mov_text",  // encode SRT → MP4 closed-caption track
             ])
             .on("start", (cmd: string) =>
                 console.log("[ffmpeg] spawn:", cmd.slice(0, 300))
             )
             .on("end", () => {
-                console.log("[ffmpeg] burn complete →", outputPath);
+                console.log("[ffmpeg] subtitle embed complete →", outputPath);
                 resolve(outputPath);
             })
             .on("error", (err: Error, _stdout?: unknown, stderr?: unknown) => {
-                console.error("[ffmpeg] BURN ERROR:", err.message);
+                console.error("[ffmpeg] EMBED ERROR:", err.message);
                 console.error("[ffmpeg] stderr:", String(stderr ?? "").slice(0, 1000));
                 reject(
                     new Error(
-                        `FFmpeg burn error: ${err.message}\n${String(stderr ?? "").slice(0, 500)}`
+                        `FFmpeg embed error: ${err.message}\n${String(stderr ?? "").slice(0, 500)}`
                     )
                 );
             })
             .save(outputPath);
     });
 }
+
