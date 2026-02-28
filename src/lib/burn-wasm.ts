@@ -18,9 +18,9 @@ import { toBlobURL } from "@ffmpeg/util";
 const CORE_VERSION = "0.12.6";
 const CORE_BASE = `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
 
-// Small (218 KB) Latin font served from jsDelivr with CORS headers
-const FONT_URL =
-    "https://cdn.jsdelivr.net/npm/open-sans-fontface@1.4.2/fonts/Regular/OpenSans-Regular.ttf";
+// Font file served from our own public/ directory — no external CDN dependency.
+// DejaVu Sans TTF: public/fonts/subtitle.ttf (757 KB, copied at build time)
+const FONT_URL = "/fonts/subtitle.ttf";
 
 // ── Module-level caches ────────────────────────────────────────────────────────
 
