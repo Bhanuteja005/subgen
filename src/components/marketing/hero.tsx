@@ -171,12 +171,10 @@ const Hero = () => {
     const [burnPct, setBurnPct] = useState<number>(0);
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-    // Video natural aspect ratio + live pane size — used to compute the
-    // exact rendered video rect inside the object-contain container so the
-    // subtitle overlay is constrained to the video content (not black bars)
-    // and the font size is proportional to the rendered video height.
+    // Video natural aspect ratio — used to constrain the subtitle overlay
+    // to the actual video content rect (avoids spilling into black bars for
+    // portrait/reel videos).  Font size is fixed — no measurement needed.
     const [videoAspect, setVideoAspect] = useState<number | null>(null);
-    const [paneSize, setPaneSize] = useState<{ w: number; h: number }>({ w: 0, h: 480 });
 
     // Auto-delete from R2 after 30 min — gives users time to edit subtitles and download
     useEffect(() => {
@@ -193,21 +191,7 @@ const Hero = () => {
         return () => { URL.revokeObjectURL(vttUrl); };
     }, [vttUrl]);
 
-    // Keep pane dimensions live via ResizeObserver so the subtitle overlay
-    // always uses the correct rendered video rect (handles resize + panel mount)
-    useEffect(() => {
-        const el = videoPaneRef.current;
-        if (!el) return;
-        const ro = new ResizeObserver(entries => {
-            for (const entry of entries) {
-                setPaneSize({ w: entry.contentRect.width, h: entry.contentRect.height });
-            }
-        });
-        ro.observe(el);
-        return () => ro.disconnect();
-    // re-attach whenever appState reaches "done" (panel enters the DOM then)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [appState]);
+
 
     const validateFile = useCallback((file: File) => {
         if (file.size > 500 * 1024 * 1024) { setError("File exceeds 500 MB limit."); return false; }
@@ -860,29 +844,32 @@ const Hero = () => {
                                                 className="w-full h-full max-h-[480px] object-contain"
                                             />
                                             {activeSubtitle && (() => {
-                                                // Compute the exact rendered video rect inside the
-                                                // object-contain pane.  Both dimensions matter:
-                                                //   portrait reel in a landscape pane → narrow column
-                                                //   landscape video in a square pane → letter-boxed
-                                                const aspect = videoAspect ?? (16 / 9);
-                                                const pw = paneSize.w || 640;
-                                                const ph = paneSize.h || 480;
-                                                // object-contain: scale to fit while preserving aspect
-                                                const renderedW = Math.min(pw, ph * aspect);
-                                                const renderedH = Math.min(ph, pw / aspect);
-                                                // Font size proportional to rendered video HEIGHT —
-                                                // this matches the standard ~3 % rule used by broadcast
-                                                // subtitles.  Clamped so tiny/huge videos stay legible.
-                                                const fontSize = Math.round(
-                                                    Math.max(12, Math.min(16, renderedH * 0.03))
-                                                );
+                                                // Constrain subtitle to the actual rendered video rect
+                                                // so it never spills into black bars (portrait/reel).
+                                                // We read the video element's bounding rect directly —
+                                                // this is always accurate regardless of aspect ratio.
+                                                let maxW: string = 'calc(100% - 24px)';
+                                                if (videoRef.current) {
+                                                    const vr = videoRef.current.getBoundingClientRect();
+                                                    const pr = videoPaneRef.current?.getBoundingClientRect();
+                                                    if (vr.width > 0 && videoAspect !== null && pr) {
+                                                        // object-contain: the displayed content width is
+                                                        // min(video-el-width, video-el-height * aspect)
+                                                        const contentW = Math.floor(
+                                                            Math.min(vr.width, vr.height * videoAspect)
+                                                        );
+                                                        maxW = `${Math.max(contentW - 16, 80)}px`;
+                                                    }
+                                                }
                                                 return (
                                                     <div className="absolute bottom-14 left-0 right-0 flex justify-center pointer-events-none px-2">
                                                         <span
-                                                            className="bg-black/70 text-white font-medium rounded text-center leading-snug break-words px-2.5 py-1"
+                                                            className="text-white font-semibold rounded text-center leading-snug break-words px-3 py-1.5"
                                                             style={{
-                                                                fontSize: `${fontSize}px`,
-                                                                maxWidth: `${Math.floor(renderedW - 12)}px`,
+                                                                fontSize: '14px',
+                                                                maxWidth: maxW,
+                                                                background: 'rgba(0,0,0,0.75)',
+                                                                textShadow: '0 1px 3px rgba(0,0,0,0.8)',
                                                             }}
                                                         >
                                                             {activeSubtitle}
