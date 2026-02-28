@@ -94,11 +94,14 @@ function buildDrawtextFilter(srtContent: string, fontPath: string): string {
         filters.push(
             `drawtext=fontfile='${fontPath}'` +
             `:text='${text}'` +
-            `:fontsize=16` +
+            `:fontsize=28` +
             `:fontcolor=white` +
-            `:box=1:boxcolor=black@0.85:boxborderw=6` +
+            `:bordercolor=black` +
+            `:borderw=3` +
+            `:shadowcolor=black@0.6` +
+            `:shadowx=2:shadowy=2` +
             `:x=(w-text_w)/2` +
-            `:y=h-50` +
+            `:y=h-80` +
             `:enable='between(t,${start.toFixed(3)},${end.toFixed(3)})'`,
         );
     }
