@@ -10,6 +10,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.999.0",
     "@aws-sdk/s3-request-presigner": "^3.999.0",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@hookform/resolvers": "^5.2.2",
     "@number-flow/react": "^0.5.10",
     "@radix-ui/react-accordion": "^1.2.12",
@@ -80,6 +82,11 @@
     "typescript": "^5"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["ffmpeg-static", "sharp", "@swc/core", "esbuild"]
+    "onlyBuiltDependencies": [
+      "ffmpeg-static",
+      "sharp",
+      "@swc/core",
+      "esbuild"
+    ]
   }
 }

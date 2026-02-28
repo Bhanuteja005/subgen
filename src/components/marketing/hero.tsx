@@ -9,6 +9,7 @@ import { cn } from '@/utils';
 import Balancer from 'react-wrap-balancer';
 import Container from "../global/container";
 import type { TranscriptionSegment } from '@/lib/fastrouter';
+import { burnSubtitlesWasm } from '@/lib/burn-wasm';
 
 // ─── Floating badges ──────────────────────────────────────────────────────────
 
@@ -163,6 +164,8 @@ const Hero = () => {
     const [activeSubtitle, setActiveSubtitle] = useState<string>("");
     const [error, setError] = useState<string | null>(null);
     const [burningCaptioned, setBurningCaptioned] = useState(false);
+    const [burnPhase, setBurnPhase] = useState<string>("");
+    const [burnPct, setBurnPct] = useState<number>(0);
 
     // Auto-delete from R2 after 5 min
     useEffect(() => {
@@ -769,49 +772,46 @@ const Hero = () => {
                                                         size="sm"
                                                         variant="outline"
                                                         className="h-7 text-xs px-2 gap-1"
-                                                        title="Download video with burned-in subtitles"
+                                                        title="Download video with burned-in subtitles (processed in your browser)"
                                                         onClick={async () => {
-                                                            if (!videoKey) return downloadVideo(videoUrl!, selectedFile?.name ?? "video.mp4");
+                                                            if (!videoKey || !srtContent) {
+                                                                return downloadVideo(videoUrl!, selectedFile?.name ?? "video.mp4");
+                                                            }
                                                             setBurningCaptioned(true);
+                                                            setBurnPhase("Starting…");
+                                                            setBurnPct(0);
                                                             try {
-                                                                // Step 1: burn subtitles server-side
-                                                                const res = await fetch('/api/burn-subtitles', {
-                                                                    method: 'POST',
-                                                                    headers: { 'Content-Type': 'application/json' },
-                                                                    body: JSON.stringify({ key: videoKey, srtContent: srtContent || undefined }),
-                                                                });
-                                                                if (!res.ok) {
-                                                                    const errBody = await res.json().catch(() => ({}));
-                                                                    throw new Error(errBody?.error ?? `Burn failed (${res.status})`);
-                                                                }
-                                                                const data = await res.json();
-                                                                const outKey = data?.key;
-                                                                if (!outKey) throw new Error('Server did not return captioned video key');
-
-                                                                // Step 2: download via our server proxy — no R2 CORS issues
-                                                                const downloadName = (selectedFile?.name ?? 'video').replace(/\.[^/.]+$/, '') + '_captioned.mp4';
-                                                                const proxyUrl = `/api/download-video?key=${encodeURIComponent(outKey)}`;
-                                                                const dlRes = await fetch(proxyUrl);
-                                                                if (!dlRes.ok) throw new Error(`Download proxy failed (${dlRes.status})`);
-                                                                const blob = await dlRes.blob();
-                                                                const blobUrl = URL.createObjectURL(blob);
-                                                                const a = document.createElement('a');
-                                                                a.href = blobUrl;
-                                                                a.download = downloadName;
-                                                                document.body.appendChild(a);
-                                                                a.click();
-                                                                document.body.removeChild(a);
-                                                                URL.revokeObjectURL(blobUrl);
-                                                            } catch (e: any) {
-                                                                console.error('burn download failed', e);
-                                                                setError(e?.message ?? 'Burn failed — please try again');
+                                                                const outputName = (selectedFile?.name ?? 'video').replace(/\.[^/.]+$/, '') + '_subtitled.mp4';
+                                                                await burnSubtitlesWasm(
+                                                                    videoKey,
+                                                                    srtContent,
+                                                                    outputName,
+                                                                    (phase, pct) => {
+                                                                        setBurnPhase(phase);
+                                                                        setBurnPct(pct);
+                                                                    },
+                                                                );
+                                                            } catch (e: unknown) {
+                                                                console.error('wasm burn failed', e);
+                                                                setError((e instanceof Error ? e.message : String(e)) ?? 'Burn failed — please try again');
                                                             } finally {
                                                                 setBurningCaptioned(false);
+                                                                setBurnPhase("");
+                                                                setBurnPct(0);
                                                             }
                                                         }}
                                                         disabled={burningCaptioned}
                                                     >
-                                                        {burningCaptioned ? <><Loader2Icon className="size-3 mr-1 animate-spin" />Burning…</> : <><DownloadIcon className="size-3" />Video</>}
+                                                        {burningCaptioned ? (
+                                                            <>
+                                                                <Loader2Icon className="size-3 mr-1 animate-spin" />
+                                                                <span className="max-w-[100px] truncate">
+                                                                    {burnPhase || 'Working…'}{burnPct > 0 && burnPct < 100 ? ` ${burnPct}%` : ''}
+                                                                </span>
+                                                            </>
+                                                        ) : (
+                                                            <><DownloadIcon className="size-3" />Video</>
+                                                        )}
                                                     </Button>
                                                 </div>
                                             </div>
