@@ -142,6 +142,8 @@ const Hero = () => {
     // State
     const fileInputRef = useRef<HTMLInputElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
+    // Guard flag: prevents onBlur from auto-saving when a split is in progress
+    const splitInProgressRef = useRef(false);
     const [appState, setAppState] = useState<"idle" | "ready" | "processing" | "done" | "error">("idle");
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [isDragging, setIsDragging] = useState(false);
@@ -439,6 +441,67 @@ const Hero = () => {
         setToastVisible(true);
         window.setTimeout(() => setToastVisible(false), 6000);
     }, [editText, segments, persistSubtitles]);
+
+    /**
+     * Split the segment being edited at the text cursor position.
+     * Text before cursor stays on the current segment; text after goes to a new
+     * segment inserted immediately after it.  Timing is divided proportionally
+     * to the character split point.
+     */
+    const splitSegment = useCallback(async (
+        seg: TranscriptionSegment,
+        segIdx: number,
+        cursorPos: number,
+    ) => {
+        splitInProgressRef.current = true;
+        const before = editText.slice(0, cursorPos).trim();
+        const after  = editText.slice(cursorPos).trim();
+
+        // If one side is empty, behave like a normal save + advance
+        if (!before || !after) {
+            splitInProgressRef.current = false;
+            const nextSeg = segments[segIdx + 1] ?? null;
+            await saveEdit(seg.id);
+            if (nextSeg) window.setTimeout(() => startEdit(nextSeg), 50);
+            return;
+        }
+
+        // Proportional timing split
+        const ratio     = cursorPos / Math.max(editText.length, 1);
+        const duration  = seg.end - seg.start;
+        const splitTime = Number((seg.start + duration * ratio).toFixed(3));
+
+        const newSeg: TranscriptionSegment = {
+            id: Date.now(),          // unique; re-numbered in SRT by buildSrtFromSegments
+            start: splitTime,
+            end: seg.end,
+            text: after,
+            originalText: after,
+        };
+
+        const updatedCurrent = { ...seg, text: before, end: splitTime };
+        const updatedSegments = [
+            ...segments.slice(0, segIdx),
+            updatedCurrent,
+            newSeg,
+            ...segments.slice(segIdx + 1),
+        ];
+
+        setEditingSegmentId(null);
+        setEditText("");
+        setSegments(updatedSegments);
+        setSrtContent(buildSrtFromSegments(updatedSegments));
+        setVttUrl(URL.createObjectURL(new Blob([buildVttFromSegments(updatedSegments)], { type: 'text/vtt' })));
+        setLastEdit({ segId: seg.id, previousSegments: segments.map(s => ({ ...s })), previousText: seg.text });
+        setToastVisible(true);
+        window.setTimeout(() => setToastVisible(false), 6000);
+
+        await persistSubtitles(updatedSegments);
+        splitInProgressRef.current = false;
+
+        // Auto-focus the new (second) segment for immediate editing
+        window.setTimeout(() => startEdit(newSeg), 50);
+    }, [editText, segments, persistSubtitles, saveEdit, startEdit]);
 
     const undoEdit = useCallback(async () => {
         if (!lastEdit) return;
@@ -912,16 +975,17 @@ const Hero = () => {
                                                                                     onKeyDown={(e) => {
                                                                                         if (e.key === 'Enter' && !e.shiftKey) {
                                                                                             e.preventDefault();
-                                                                                            // Save and jump to next segment
-                                                                                            const nextSeg = segments[segIdx + 1] ?? null;
-                                                                                            saveEdit(seg.id).then(() => {
-                                                                                                if (nextSeg) window.setTimeout(() => startEdit(nextSeg), 0);
-                                                                                            });
+                                                                                            // Split the subtitle at the cursor position
+                                                                                            const cursor = (e.currentTarget as HTMLTextAreaElement).selectionStart ?? editText.length;
+                                                                                            splitSegment(seg, segIdx, cursor);
                                                                                         } else if (e.key === 'Escape') {
                                                                                             cancelEdit();
                                                                                         }
                                                                                     }}
-                                                                                    onBlur={() => saveEdit(seg.id)}
+                                                                                    onBlur={() => {
+                                                                                        // Skip auto-save when a split just fired (split handles persistence itself)
+                                                                                        if (!splitInProgressRef.current) saveEdit(seg.id);
+                                                                                    }}
                                                                                     className="w-full text-xs p-1 rounded border border-primary/40 resize-none bg-background focus:outline-none focus:ring-1 focus:ring-primary/30"
                                                                                     rows={2}
                                                                                 />
