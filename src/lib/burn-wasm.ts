@@ -125,12 +125,16 @@ function buildFilter(srt: string): string {
         const text  = sanitise(lines.slice(ti + 1).join(" "));
         if (!text) continue;
 
-        // enable=step(t-start)*step(end-t) is equivalent to between(t,start,end)
-        // but contains NO commas, which avoids the filter-chain parser conflict
-        // where commas inside the enable value get mis-read as filter separators.
-        // Single-quoting the enable value does NOT reliably fix that conflict in
-        // @ffmpeg/core@0.12.x (the closing quote still gets consumed before the
-        // chain comma is detected), so we avoid commas entirely.
+        // ffmpeg filter-option escaping: \, is a literal comma inside an option
+        // value; the unescaped , after the closing paren is the filter-chain
+        // separator.  between(t,a,b) is available in libavutil eval; step() is
+        // NOT.  Single-quoting the enable= value is unreliable in the wasm UMD
+        // build, so we use \, (backslash-comma) escaping instead.
+        //
+        // Resulting string passed to ffmpeg (per segment):
+        //   drawtext=fontfile=font.ttf:...:enable=between(t\,14.000\,18.500)
+        //                                                 ^^           ^^  — literal commas
+        //   then , before next drawtext= is the chain separator.
         segments.push(
             `drawtext=fontfile=font.ttf` +
             `:text='${text}'` +
@@ -141,7 +145,7 @@ function buildFilter(srt: string): string {
             `:boxborderw=6` +
             `:x=(w-text_w)/2` +
             `:y=h-text_h-50` +
-            `:enable=step(t-${start.toFixed(3)})*step(${end.toFixed(3)}-t)`
+            `:enable=between(t\\,${start.toFixed(3)}\\,${end.toFixed(3)})`
         );
     }
 
