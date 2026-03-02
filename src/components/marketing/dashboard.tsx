@@ -1,343 +1,321 @@
-import { LayoutGrid, FolderKanban, Users, CheckSquare, CircleUserRound, Receipt, FileText, Blocks, Settings, Search, Bell, Calendar, MoreHorizontal, BellIcon } from 'lucide-react';
-import Icons from '../global/icons';
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+    LayoutGrid,
+    UploadCloudIcon,
+    Loader2Icon,
+    LogOutIcon,
+    Trash2Icon,
+    DownloadIcon,
+    FilmIcon,
+    ZapIcon,
+    FileTextIcon,
+    RefreshCwIcon,
+    ShieldAlertIcon,
+} from "lucide-react";
+import { signOut, useSession } from "@/lib/auth-client";
+import Icons from "../global/icons";
+import { Button } from "../ui/button";
+import { cn } from "@/utils";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface VideoJob {
+    _id: string;
+    fileName: string;
+    fileSize: number;
+    r2Key: string;
+    status: "processing" | "done" | "error";
+    durationSeconds: number;
+    segmentCount: number;
+    tokenUsage: number;
+    createdAt: string;
+    errorMessage?: string;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtDate(iso: string) {
+    return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function fmtDuration(sec: number) {
+    if (!sec) return "—";
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function fmtSize(bytes: number) {
+    if (!bytes) return "—";
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ─── API helpers ──────────────────────────────────────────────────────────────
+
+async function fetchVideos(): Promise<VideoJob[]> {
+    const res = await fetch("/api/dashboard/videos");
+    if (!res.ok) throw new Error("Failed to load videos");
+    const data = await res.json();
+    return data.videos ?? [];
+}
+
+async function deleteVideo(id: string): Promise<void> {
+    const res = await fetch(`/api/dashboard/videos?id=${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Failed to delete video");
+}
+
+// ─── Stat Card ────────────────────────────────────────────────────────────────
+
+function StatCard({ icon: Icon, label, value, sub }: { icon: React.FC<{ className?: string }>; label: string; value: string | number; sub?: string }) {
+    return (
+        <div className="flex items-center gap-4 rounded-xl border border-foreground/10 bg-foreground/[0.03] px-5 py-4">
+            <div className="p-2.5 rounded-lg bg-primary/10 text-primary shrink-0">
+                <Icon className="size-5" />
+            </div>
+            <div>
+                <p className="text-xs text-muted-foreground">{label}</p>
+                <p className="text-lg font-semibold">{value}</p>
+                {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+            </div>
+        </div>
+    );
+}
+
+// ─── Status Badge ─────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: VideoJob["status"] }) {
+    return (
+        <span className={cn(
+            "inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full",
+            status === "done"       && "bg-green-500/10 text-green-400",
+            status === "processing" && "bg-yellow-500/10 text-yellow-400",
+            status === "error"      && "bg-red-500/10 text-red-400",
+        )}>
+            {status === "processing" && <Loader2Icon className="size-3 animate-spin" />}
+            {status === "done"       && <span className="size-1.5 rounded-full bg-green-400 inline-block" />}
+            {status === "error"      && <span className="size-1.5 rounded-full bg-red-400 inline-block" />}
+            {status}
+        </span>
+    );
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
 
 const Dashboard = () => {
-    return (
-        <div className="w-full h-full bg-[#0A0B0F] flex overflow-hidden">
-            <aside className="w-60 border-r border-foreground/10 flex flex-col shrink-0">
-                <div className="p-4">
-                    <Icons.wordmark className="h-5 w-auto text-white" />
-                </div>
+    const router = useRouter();
+    const { data: session } = useSession();
+    const queryClient = useQueryClient();
+    const [deletingId, setDeletingId] = useState<string | null>(null);
 
-                <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-                    <div className="relative px-3 py-2.5 bg-primary/10 text-primary rounded-lg flex items-center gap-3 text-sm font-medium cursor-pointer">
-                        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 bg-primary rounded-r" />
-                        <LayoutGrid className="w-4 h-4" />
+    const { data: videos = [], isLoading, isError, refetch } = useQuery({
+        queryKey: ["dashboard-videos"],
+        queryFn: fetchVideos,
+    });
+
+    const deleteMutation = useMutation({
+        mutationFn: deleteVideo,
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dashboard-videos"] }),
+        onSettled: () => setDeletingId(null),
+    });
+
+    const handleLogout = async () => {
+        await signOut();
+        router.push("/auth/sign-in");
+    };
+
+    const handleDelete = (id: string) => {
+        setDeletingId(id);
+        deleteMutation.mutate(id);
+    };
+
+    const handleDownloadSRT = async (jobId: string, fileName: string) => {
+        try {
+            const res = await fetch(`/api/dashboard/videos/srt?id=${jobId}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (!data.srtContent) return;
+            const blob = new Blob([data.srtContent], { type: "text/plain" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = fileName.replace(/\.[^/.]+$/, "") + ".srt";
+            a.click();
+        } catch {
+            // silently fail
+        }
+    };
+
+    const totalTokens = videos.reduce((acc, v) => acc + (v.tokenUsage ?? 0), 0);
+    const doneCount   = videos.filter(v => v.status === "done").length;
+    const isAdmin     = (session?.user as Record<string, unknown>)?.role === "admin";
+
+    return (
+        <div className="w-full min-h-screen bg-background flex flex-col">
+            {/* ── Header ── */}
+            <header className="border-b border-foreground/10 px-6 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <Icons.wordmark className="h-6 w-auto text-foreground" />
+                    <div className="hidden sm:flex items-center gap-1.5 text-sm text-muted-foreground border-l border-foreground/10 pl-3">
+                        <LayoutGrid className="size-4" />
                         <span>Dashboard</span>
                     </div>
-                    <div className="px-3 py-2.5 text-foreground/60 hover:text-white hover:bg-white/5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer">
-                        <FolderKanban className="w-4 h-4" />
-                        <span>Projects</span>
-                        <span className="ml-auto text-xs bg-white/10 px-1.5 py-0.5 rounded">12</span>
+                </div>
+                <div className="flex items-center gap-3">
+                    {isAdmin && (
+                        <Button size="sm" variant="outline" onClick={() => router.push("/admin")}>
+                            <ShieldAlertIcon className="size-3.5 mr-1.5" />
+                            Admin
+                        </Button>
+                    )}
+                    <div className="hidden sm:block text-right">
+                        <p className="text-sm font-medium leading-tight">{session?.user?.name}</p>
+                        <p className="text-xs text-muted-foreground">{session?.user?.email}</p>
                     </div>
-                    <div className="px-3 py-2.5 text-foreground/60 hover:text-white hover:bg-white/5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer">
-                        <Users className="w-4 h-4" />
-                        <span>Clients</span>
-                        <span className="ml-auto text-xs bg-white/10 px-1.5 py-0.5 rounded">48</span>
-                    </div>
-                    <div className="px-3 py-2.5 text-foreground/60 hover:text-white hover:bg-white/5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer">
-                        <CheckSquare className="w-4 h-4" />
-                        <span>Tasks</span>
-                        <span className="ml-auto text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded">8</span>
-                    </div>
-                    <div className="px-3 py-2.5 text-foreground/60 hover:text-white hover:bg-white/5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer">
-                        <CircleUserRound className="w-4 h-4" />
-                        <span>Team</span>
-                    </div>
-                    <div className="px-3 py-2.5 text-foreground/60 hover:text-white hover:bg-white/5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer">
-                        <Receipt className="w-4 h-4" />
-                        <span>Invoices</span>
-                    </div>
-                    <div className="px-3 py-2.5 text-foreground/60 hover:text-white hover:bg-white/5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer">
-                        <FileText className="w-4 h-4" />
-                        <span>Files</span>
-                    </div>
+                    <Button size="sm" variant="ghost" onClick={handleLogout}>
+                        <LogOutIcon className="size-4 mr-1.5" />
+                        Sign out
+                    </Button>
+                </div>
+            </header>
 
-                    <div className="my-2 border-t border-foreground/10" />
+            {/* ── Body ── */}
+            <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-8">
+                {/* Greeting */}
+                <div>
+                    <h1 className="text-2xl font-semibold">
+                        Welcome back{session?.user?.name ? `, ${session.user.name.split(" ")[0]}` : ""}!
+                    </h1>
+                    <p className="text-sm text-muted-foreground mt-1">
+                        Here&apos;s an overview of your Telugu subtitle jobs.
+                    </p>
+                </div>
 
-                    <div className="px-3 py-2.5 text-foreground/60 hover:text-white hover:bg-white/5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer">
-                        <Blocks className="w-4 h-4" />
-                        <span>Templates</span>
-                    </div>
-                    <div className="px-3 py-2.5 text-foreground/60 hover:text-white hover:bg-white/5 rounded-lg flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer">
-                        <Settings className="w-4 h-4" />
-                        <span>Settings</span>
-                    </div>
-                </nav>
+                {/* Stats */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <StatCard icon={FilmIcon}     label="Total Videos"     value={videos.length} />
+                    <StatCard icon={LayoutGrid}   label="Completed"        value={doneCount} />
+                    <StatCard icon={ZapIcon}      label="Tokens Used"      value={totalTokens > 999 ? `${(totalTokens / 1000).toFixed(1)}k` : totalTokens} />
+                    <StatCard icon={FileTextIcon} label="SRT Files Ready"  value={doneCount} sub="ready to download" />
+                </div>
 
-                <div className="p-3 space-y-2">
-                    <button className="w-full px-3 py-2 text-xs text-foreground/60 hover:text-white hover:bg-white/5 rounded-lg transition-colors text-left cursor-pointer">
-                        Help Center
-                    </button>
-                    <button className="w-full px-3 py-2 text-xs bg-primary/10 text-primary hover:bg-primary/20 rounded-lg transition-colors font-medium cursor-pointer">
-                        Upgrade Plan
-                    </button>
-                    <div className="flex items-center gap-2 px-3 py-2 hover:bg-white/5 rounded-lg transition-colors cursor-pointer">
-                        <div className="size-7 rounded-full bg-linear-to-br from-primary to-blue-500 flex items-center justify-center">
-                            <span className="text-white font-semibold text-xs">SS</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium text-white truncate">Shreyas Sihasane</p>
-                            <p className="text-xs text-foreground/60 truncate">shreyas@SubGen.app</p>
-                        </div>
-                        <MoreHorizontal className="w-4 h-4 text-foreground/60" />
+                {/* Actions */}
+                <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">My Videos</h2>
+                    <div className="flex items-center gap-2">
+                        <Button size="sm" variant="outline" onClick={() => refetch()}>
+                            <RefreshCwIcon className="size-3.5 mr-1.5" />
+                            Refresh
+                        </Button>
+                        <Button size="sm" onClick={() => router.push("/")}>
+                            <UploadCloudIcon className="size-3.5 mr-1.5" />
+                            New Upload
+                        </Button>
                     </div>
                 </div>
-            </aside>
 
-            <div className="flex-1 flex flex-col min-w-0">
-                <header className="h-16 border-b border-foreground/10 flex items-center justify-between px-6 shrink-0">
-                    <div className="flex items-center gap-4 flex-1">
-                        <div>
-                            <h1 className="text-base font-semibold flex items-center gap-2">
-                                <Calendar className="w-4 h-4 text-primary" />
-                                Today
-                            </h1>
-                            <p className="text-xs text-foreground/60">Saturday, Nov 29</p>
-                        </div>
-                        <div className="flex-1 max-w-md ml-8">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-foreground/40" />
-                                <input
-                                    type="text"
-                                    placeholder="Search tasks, clients, invoices..."
-                                    className="w-full h-9 pl-9 pr-4 bg-foreground/5 border border-foreground/10 rounded-lg text-sm placeholder:text-foreground/40 focus:outline-none focus:border-primary/50"
-                                />
-                            </div>
-                        </div>
+                {/* Table */}
+                {isLoading ? (
+                    <div className="flex items-center justify-center py-20 gap-3 text-muted-foreground">
+                        <Loader2Icon className="size-5 animate-spin" />
+                        <span>Loading your videos…</span>
                     </div>
-
-                    <div className="flex items-center gap-2">
-                        <button className="relative w-9 h-9 flex items-center justify-center hover:bg-foreground/5 rounded-lg transition-colors cursor-pointer">
-                            <BellIcon className="w-4 h-4 text-foreground/60" />
-                            <span className="absolute top-2 right-2 w-2 h-2 bg-primary rounded-full" />
-                        </button>
-                        <div className="size-8 rounded-full bg-linear-to-br from-primary to-blue-500 flex items-center justify-center cursor-pointer">
-                            <span className="text-white font-semibold text-xs leading-none mt-0.5">SS</span>
-                        </div>
+                ) : isError ? (
+                    <div className="flex items-center justify-center py-20 text-red-400">
+                        Failed to load videos. Please refresh.
                     </div>
-                </header>
-
-                <main className="flex-1 overflow-auto">
-                    <div className="grid grid-cols-[1fr_320px] gap-6 p-6 h-full">
-                        <div className="space-y-6">
-                            <div>
-                                <div className="flex items-center justify-between mb-4">
-                                    <h2 className="text-sm font-semibold">Your Tasks Today</h2>
-                                    <span className="text-xs text-foreground/60">8 tasks</span>
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-3 p-3 bg-foreground/2 hover:bg-foreground/5 rounded-lg transition-colors cursor-pointer border border-foreground/10">
-                                        <div className="w-1 h-8 bg-primary rounded-full" />
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium">Review project proposal</p>
-                                            <p className="text-xs text-foreground/60">Acme Corp • Due in 2 hours</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3 p-3 bg-foreground/2 hover:bg-foreground/5 rounded-lg transition-colors cursor-pointer border border-foreground/10">
-                                        <div className="w-1 h-8 bg-tertiary rounded-full" />
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium">Send invoice to client</p>
-                                            <p className="text-xs text-foreground/60">Tech Startup • Overdue</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3 p-3 bg-foreground/2 hover:bg-foreground/5 rounded-lg transition-colors cursor-pointer border border-foreground/10">
-                                        <div className="w-1 h-8 bg-foreground/20 rounded-full" />
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium">Team standup meeting</p>
-                                            <p className="text-xs text-foreground/60">Internal • Today at 3:00 PM</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3 p-3 bg-foreground/2 hover:bg-foreground/5 rounded-lg transition-colors cursor-pointer border border-foreground/10">
-                                        <div className="w-1 h-8 bg-foreground/20 rounded-full" />
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-sm font-medium">Update design system</p>
-                                            <p className="text-xs text-foreground/60">Design Project • Tomorrow</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <div className="flex items-center justify-between mb-4">
-                                    <h2 className="text-sm font-semibold">Active Projects</h2>
-                                    <span className="text-xs text-primary cursor-pointer hover:underline">View all</span>
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="bg-foreground/2 border border-foreground/10 rounded-lg p-4 hover:border-primary/30 transition-colors cursor-pointer">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                                                <span className="text-primary font-semibold text-xs">AC</span>
-                                            </div>
-                                            <span className="text-xs text-foreground/60">3 days left</span>
-                                        </div>
-                                        <h3 className="text-sm font-semibold mb-1">Acme Rebrand</h3>
-                                        <p className="text-xs text-foreground/60 mb-3">Acme Corp</p>
-                                        <div className="space-y-1">
-                                            <div className="flex items-center justify-between text-xs">
-                                                <span className="text-foreground/60">Progress</span>
-                                                <span className="font-medium">75%</span>
-                                            </div>
-                                            <div className="h-1.5 bg-foreground/10 rounded-full overflow-hidden">
-                                                <div className="h-full bg-primary rounded-full" style={{ width: '75%' }} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="bg-foreground/2 border border-foreground/10 rounded-lg p-4 hover:border-primary/30 transition-colors cursor-pointer">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="w-8 h-8 rounded-lg bg-tertiary/10 flex items-center justify-center">
-                                                <span className="text-tertiary font-semibold text-xs">TS</span>
-                                            </div>
-                                            <span className="text-xs text-foreground/60">1 week left</span>
-                                        </div>
-                                        <h3 className="text-sm font-semibold mb-1">Tech Startup</h3>
-                                        <p className="text-xs text-foreground/60 mb-3">Website Design</p>
-                                        <div className="space-y-1">
-                                            <div className="flex items-center justify-between text-xs">
-                                                <span className="text-foreground/60">Progress</span>
-                                                <span className="font-medium">45%</span>
-                                            </div>
-                                            <div className="h-1.5 bg-foreground/10 rounded-full overflow-hidden">
-                                                <div className="h-full bg-tertiary rounded-full" style={{ width: '45%' }} />
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <div className="flex items-center justify-between mb-4">
-                                    <h2 className="text-sm font-semibold">Team Members</h2>
-                                    <span className="text-xs text-primary cursor-pointer hover:underline">View all</span>
-                                </div>
-                                <div className="grid grid-cols-3 gap-3">
-                                    <div className="bg-foreground/2 border border-foreground/10 rounded-lg p-3 hover:border-primary/30 transition-colors cursor-pointer">
-                                        <div className="flex flex-col items-center text-center">
-                                            <div className="size-10 rounded-full bg-linear-to-br from-primary to-blue-500 flex items-center justify-center mb-2">
-                                                <span className="text-white font-semibold text-xs">SS</span>
-                                            </div>
-                                            <p className="text-xs font-semibold truncate w-full">Shreyas S</p>
-                                            <p className="text-xs text-foreground/60">Designer</p>
-                                        </div>
-                                    </div>
-                                    <div className="bg-foreground/2 border border-foreground/10 rounded-lg p-3 hover:border-primary/30 transition-colors cursor-pointer">
-                                        <div className="flex flex-col items-center text-center">
-                                            <div className="size-10 rounded-full bg-linear-to-br from-tertiary to-purple-500 flex items-center justify-center mb-2">
-                                                <span className="text-white font-semibold text-xs">JD</span>
-                                            </div>
-                                            <p className="text-xs font-semibold truncate w-full">John Doe</p>
-                                            <p className="text-xs text-foreground/60">Developer</p>
-                                        </div>
-                                    </div>
-                                    <div className="bg-foreground/2 border border-foreground/10 rounded-lg p-3 hover:border-primary/30 transition-colors cursor-pointer">
-                                        <div className="flex flex-col items-center text-center">
-                                            <div className="size-10 rounded-full bg-linear-to-br from-orange-500 to-red-500 flex items-center justify-center mb-2">
-                                                <span className="text-white font-semibold text-xs">AS</span>
-                                            </div>
-                                            <p className="text-xs font-semibold truncate w-full">Alice Smith</p>
-                                            <p className="text-xs text-foreground/60">Manager</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                ) : videos.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-24 gap-4 border border-dashed border-foreground/10 rounded-2xl">
+                        <div className="p-4 rounded-2xl bg-primary/10 text-primary">
+                            <UploadCloudIcon className="size-8" />
                         </div>
-
-                        <div className="space-y-6">
-                            <div className="bg-foreground/2 border border-foreground/10 rounded-xl p-5">
-                                <h2 className="text-sm font-semibold mb-4">Upcoming Deadlines</h2>
-                                <div className="space-y-3">
-                                    <div className="flex gap-3">
-                                        <div className="text-center shrink-0">
-                                            <div className="text-xs text-foreground/60">Dec</div>
-                                            <div className="text-lg font-bold">02</div>
-                                        </div>
-                                        <div className="flex-1">
-                                            <p className="text-sm font-medium">Project delivery</p>
-                                            <p className="text-xs text-foreground/60">Acme Rebrand</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-3">
-                                        <div className="text-center shrink-0">
-                                            <div className="text-xs text-foreground/60">Dec</div>
-                                            <div className="text-lg font-bold text-foreground/60">08</div>
-                                        </div>
-                                        <div className="flex-1">
-                                            <p className="text-sm font-medium text-foreground/60">Invoice payment</p>
-                                            <p className="text-xs text-foreground/60">Tech Startup</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-3">
-                                        <div className="text-center shrink-0">
-                                            <div className="text-xs text-foreground/60">Dec</div>
-                                            <div className="text-lg font-bold text-foreground/60">15</div>
-                                        </div>
-                                        <div className="flex-1">
-                                            <p className="text-sm font-medium text-foreground/60">Milestone review</p>
-                                            <p className="text-xs text-foreground/60">Design System</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="bg-foreground/2 border border-foreground/10 rounded-xl p-5">
-                                <h2 className="text-sm font-semibold mb-4">Latest Activity</h2>
-                                <div className="space-y-3">
-                                    <div className="flex items-start gap-3">
-                                        <div className="w-2 h-2 rounded-full bg-primary mt-1.5" />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
-                                                <p className="text-xs font-medium">Task completed</p>
-                                                <p className="text-xs text-foreground/40 mt-0.5">2 hours ago</p>
-                                            </div>
-                                            <p className="text-xs text-foreground/60">Review project proposal</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-start gap-3">
-                                        <div className="w-2 h-2 rounded-full bg-tertiary mt-1.5" />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
-                                                <p className="text-xs font-medium">Invoice paid</p>
-                                                <p className="text-xs text-foreground/40 mt-0.5">5 hours ago</p>
-                                            </div>
-                                            <p className="text-xs text-foreground/60">$1,999.00 from Acme Corp</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-start gap-3">
-                                        <div className="w-2 h-2 rounded-full bg-foreground/30 mt-1.5" />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
-                                                <p className="text-xs font-medium">New client added</p>
-                                                <p className="text-xs text-foreground/40 mt-0.5">1 day ago</p>
-                                            </div>
-                                            <p className="text-xs text-foreground/60">Tech Startup joined</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-start gap-3">
-                                        <div className="w-2 h-2 rounded-full bg-primary mt-1.5" />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
-                                                <p className="text-xs font-medium">Project milestone reached</p>
-                                                <p className="text-xs text-foreground/40 mt-0.5">2 days ago</p>
-                                            </div>
-                                            <p className="text-xs text-foreground/60">Design phase completed</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-start gap-3">
-                                        <div className="w-2 h-2 rounded-full bg-tertiary mt-1.5" />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
-                                                <p className="text-xs font-medium">Team member invited</p>
-                                                <p className="text-xs text-foreground/40 mt-0.5">3 days ago</p>
-                                            </div>
-                                            <p className="text-xs text-foreground/60">John Doe joined the team</p>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-start gap-3">
-                                        <div className="w-2 h-2 rounded-full bg-foreground/30 mt-1.5" />
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center justify-between">
-                                                <p className="text-xs font-medium">File uploaded</p>
-                                                <p className="text-xs text-foreground/40 mt-0.5">4 days ago</p>
-                                            </div>
-                                            <p className="text-xs text-foreground/60">Design assets added</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                        <div className="text-center">
+                            <p className="font-medium">No videos yet</p>
+                            <p className="text-sm text-muted-foreground mt-1">Upload your first Telugu video to get started</p>
                         </div>
+                        <Button onClick={() => router.push("/")}>
+                            <UploadCloudIcon className="size-4 mr-2" />
+                            Upload Video
+                        </Button>
                     </div>
-                </main>
-            </div>
+                ) : (
+                    <div className="rounded-xl border border-foreground/10 overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-foreground/10 bg-foreground/[0.03] text-muted-foreground">
+                                    <th className="px-4 py-3 text-left font-medium">File</th>
+                                    <th className="px-4 py-3 text-left font-medium hidden md:table-cell">Status</th>
+                                    <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">Duration</th>
+                                    <th className="px-4 py-3 text-left font-medium hidden lg:table-cell">Segments</th>
+                                    <th className="px-4 py-3 text-left font-medium hidden sm:table-cell">Date</th>
+                                    <th className="px-4 py-3 text-right font-medium">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-foreground/[0.06]">
+                                {videos.map((v) => (
+                                    <tr key={v._id} className="hover:bg-foreground/[0.02] transition-colors">
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center gap-2.5">
+                                                <div className="p-1.5 rounded-lg bg-foreground/5 text-muted-foreground shrink-0">
+                                                    <FilmIcon className="size-3.5" />
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="font-medium truncate max-w-[200px]">{v.fileName}</p>
+                                                    <p className="text-xs text-muted-foreground">{fmtSize(v.fileSize)}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 hidden md:table-cell">
+                                            <StatusBadge status={v.status} />
+                                        </td>
+                                        <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
+                                            {fmtDuration(v.durationSeconds)}
+                                        </td>
+                                        <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell">
+                                            {v.segmentCount > 0 ? v.segmentCount : "—"}
+                                        </td>
+                                        <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
+                                            {fmtDate(v.createdAt)}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center gap-1.5 justify-end">
+                                                {v.status === "done" && (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={() => handleDownloadSRT(v._id, v.fileName)}
+                                                        title="Download SRT"
+                                                    >
+                                                        <DownloadIcon className="size-3.5 mr-1" />
+                                                        <span className="hidden sm:inline">SRT</span>
+                                                    </Button>
+                                                )}
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                                                    onClick={() => handleDelete(v._id)}
+                                                    disabled={deletingId === v._id}
+                                                    title="Delete"
+                                                >
+                                                    {deletingId === v._id ? (
+                                                        <Loader2Icon className="size-3.5 animate-spin" />
+                                                    ) : (
+                                                        <Trash2Icon className="size-3.5" />
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </main>
         </div>
     );
 };

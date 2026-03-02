@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import Wrapper from '../global/wrapper';
 import { Button } from '../ui/button';
 import { ArrowRightIcon, Loader2Icon, CheckCircle2Icon, DownloadIcon, RotateCcwIcon, XCircleIcon, UploadCloudIcon, SaveIcon, X as XIcon, GripVerticalIcon } from 'lucide-react';
@@ -10,6 +11,7 @@ import Balancer from 'react-wrap-balancer';
 import Container from "../global/container";
 import type { TranscriptionSegment } from '@/lib/fastrouter';
 import { burnSubtitlesWasm } from '@/lib/burn-wasm';
+import { useSession } from '@/lib/auth-client';
 
 // ─── Floating badges ──────────────────────────────────────────────────────────
 
@@ -138,6 +140,18 @@ function formatInputTime(seconds: number): string {
 const Hero = () => {
     const badge = "Telugu Subtitle AI";
     const description = "Upload any video and get accurate, timestamped English subtitles in seconds —  Download SRT files ready for YouTube, Premiere Pro, and every major video platform.";
+
+    const router = useRouter();
+    const { data: session } = useSession();
+
+    // Redirect to sign-in if not authenticated, otherwise trigger file upload
+    const handleCTAClick = () => {
+        if (!session?.user) {
+            router.push('/auth/sign-in');
+            return;
+        }
+        fileInputRef.current?.click();
+    };
 
     // State
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -298,7 +312,11 @@ const Hero = () => {
             const pRes = await fetch("/api/process", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ key: finalKey }),
+                body: JSON.stringify({
+                    key: finalKey,
+                    fileName: selectedFile.name,
+                    fileSize: selectedFile.size,
+                }),
             });
             setProcessingStep("transcribing");
             if (!pRes.ok) {
@@ -648,7 +666,7 @@ const Hero = () => {
                         />
                         <Button
                             size="lg"
-                            onClick={() => fileInputRef.current?.click()}
+                            onClick={handleCTAClick}
                             disabled={appState === "processing"}
                         >
                             {appState === "processing" ? (
@@ -662,7 +680,7 @@ const Hero = () => {
                                 <RotateCcwIcon className="size-4 mr-2" />New Video
                             </Button>
                         ) : (
-                            <Button size="lg" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={appState === "processing"}>
+                            <Button size="lg" variant="outline" onClick={handleCTAClick} disabled={appState === "processing"}>
                                 <ArrowRightIcon className="size-4 mr-2" />Get Started
                             </Button>
                         )}
@@ -711,7 +729,7 @@ const Hero = () => {
                                         exit={{ opacity: 0 }}
                                         transition={{ duration: 0.25 }}
                                         className="flex-1 flex flex-col items-center justify-center gap-6 p-8 lg:p-16"
-                                        onClick={() => fileInputRef.current?.click()}
+                                        onClick={handleCTAClick}
                                         style={{ cursor: "pointer" }}
                                     >
                                         <div className={cn(
@@ -866,7 +884,18 @@ const Hero = () => {
                                                         <span
                                                             className="text-white font-semibold rounded text-center leading-snug break-words px-3 py-1.5"
                                                             style={{
-                                                                fontSize: '14px',
+                                                                // Mirror burn-wasm fontsize=52 proportionally.
+                                                                // scale = rendered CSS width / native video width
+                                                                // uiFont = 52 * scale  →  visually identical to download
+                                                                fontSize: (() => {
+                                                                    const v = videoRef.current;
+                                                                    if (v && v.videoWidth > 0 && v.clientWidth > 0) {
+                                                                        const scale = v.clientWidth / v.videoWidth;
+                                                                        const px = Math.round(52 * scale);
+                                                                        return `${Math.max(10, Math.min(px, 18))}px`;
+                                                                    }
+                                                                    return '13px';
+                                                                })(),
                                                                 maxWidth: maxW,
                                                                 background: 'rgba(0,0,0,0.75)',
                                                                 textShadow: '0 1px 3px rgba(0,0,0,0.8)',

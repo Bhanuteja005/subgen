@@ -7,6 +7,9 @@ import { Readable } from "stream";
 import path from "path";
 import os from "os";
 import fs from "fs";
+import { auth } from "@/lib/auth";
+import { connectDB } from "@/lib/db";
+import VideoJob from "@/models/video-job";
 
 export const runtime = "nodejs";
 // Allow up to 5 minutes for processing
@@ -17,13 +20,24 @@ export async function POST(request: NextRequest) {
     let audioTempPath: string | null = null;
 
     try {
-        const { key } = await request.json();
+        const { key, fileName, fileSize } = await request.json();
 
         if (!key) {
             return NextResponse.json(
                 { error: "Video key is required" },
                 { status: 400 }
             );
+        }
+
+        // Get session (optional – we save job even if unauthenticated, with empty userId)
+        let userId = "";
+        let userEmail = "";
+        try {
+            const session = await auth.api.getSession({ headers: request.headers });
+            userId = session?.user?.id ?? "";
+            userEmail = session?.user?.email ?? "";
+        } catch {
+            // non-fatal
         }
 
         // Step 1: Download video from R2 to a temp file
@@ -91,6 +105,29 @@ export async function POST(request: NextRequest) {
             await uploadBufferToR2(`${base}.srt`, Buffer.from(srtContent, "utf-8"), "text/plain");
         } catch (uploadErr) {
             console.warn("Failed to save SRT to R2 (non-fatal):", uploadErr);
+        }
+
+        // Step 5b: Save VideoJob to MongoDB (non-fatal)
+        try {
+            await connectDB();
+            const audioSizeBytes = audioTempPath ? fs.statSync(audioTempPath).size : 0;
+            const tokenUsage = Math.round(audioSizeBytes / 1024 * 4); // ~4 tokens per audio KB
+            const lastSeg = segments[segments.length - 1];
+            const durationSeconds = lastSeg ? Math.ceil(lastSeg.end) : 0;
+            await VideoJob.create({
+                userId,
+                userEmail,
+                fileName: fileName ?? key.split("/").pop() ?? key,
+                fileSize: fileSize ?? 0,
+                r2Key: key,
+                status: "done",
+                durationSeconds,
+                segmentCount: segments.length,
+                tokenUsage,
+                srtContent,
+            });
+        } catch (dbErr) {
+            console.warn("Failed to save VideoJob to MongoDB (non-fatal):", dbErr);
         }
 
         // Step 6: Get the public video URL
