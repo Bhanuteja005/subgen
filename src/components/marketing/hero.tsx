@@ -10,16 +10,17 @@ import { cn } from '@/utils';
 import Balancer from 'react-wrap-balancer';
 import Container from "../global/container";
 import type { TranscriptionSegment } from '@/lib/fastrouter';
-import { burnSubtitlesWasm } from '@/lib/burn-wasm';
+import { burnSubtitlesWasm, type CaptionStyle } from '@/lib/burn-wasm';
 import { useSession } from '@/lib/auth-client';
+import Image from 'next/image';
 
 // ─── Floating badges ──────────────────────────────────────────────────────────
 
 const badges = [
     { text: "Upload Video", top: "15%", left: "5%" },
-    { text: "Telugu AI Speech", top: "25%", right: "8%" },
-    { text: "Transliteration", top: "60%", left: "10%" },
-    { text: "Download SRT", top: "70%", right: "18%" },
+    { text: "Caption Preview", top: "25%", right: "8%" },
+    { text: "3 Caption Styles", top: "60%", left: "10%" },
+    { text: "Download & Share", top: "70%", right: "18%" },
 ];
 
 const FloatingBadge = ({ text, top, left, right, index }: { text: string; top: string; left?: string; right?: string; index: number }) => {
@@ -138,8 +139,8 @@ function formatInputTime(seconds: number): string {
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
 const Hero = () => {
-    const badge = "Telugu Subtitle AI";
-    const description = "Upload any video and get accurate, timestamped English subtitles in seconds —  Download SRT files ready for YouTube, Premiere Pro, and every major video platform.";
+    const badge = "Tenglish Captions";
+    const description = "Upload any video and get word-accurate captions in 2 clicks. Download the captioned video or SRT file — ready for YouTube, Reels, and every major platform.";
 
     const router = useRouter();
     const { data: session } = useSession();
@@ -183,6 +184,7 @@ const Hero = () => {
     const [burningCaptioned, setBurningCaptioned] = useState(false);
     const [burnPhase, setBurnPhase] = useState<string>("");
     const [burnPct, setBurnPct] = useState<number>(0);
+    const [captionStyle, setCaptionStyle] = useState<"default" | "plain" | "outline">("default");
     const [dragIndex, setDragIndex] = useState<number | null>(null);
     const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
     // Video natural aspect ratio — used to constrain the subtitle overlay
@@ -578,7 +580,7 @@ const Hero = () => {
     const currentStepIndex = stepIndex(processingStep);
 
     return (
-        <section id="upload" className="relative w-full flex items-center justify-center pt-16 lg:pt-32 pb-4 overflow-hidden">
+        <section className="relative w-full flex items-center justify-center pt-16 lg:pt-32 pb-4 overflow-hidden">
             <Wrapper className="relative z-10">
                 <div className="flex flex-col items-center text-center">
                     {/* Badge */}
@@ -604,7 +606,7 @@ const Hero = () => {
                     {/* Heading */}
                     <h1 className="text-4xl md:text-6xl font-semibold tracking-tight font-heading mt-8">
                         <Balancer>
-                            {"Telugu Speech to".split(" ").map((word, index) => (
+                            {"Accurate Tenglish".split(" ").map((word, index) => (
                                 <motion.span
                                     initial={{ filter: "blur(10px)", opacity: 0, y: 10 }}
                                     animate={{ filter: "blur(0px)", opacity: 1, y: 0 }}
@@ -616,14 +618,14 @@ const Hero = () => {
                                 </motion.span>
                             ))}
                             <br />
-                            {"English Subtitles".split(" ").map((word, index) => (
+                            {"Captions in 2 Clicks".split(" ").map((word, index) => (
                                 <motion.span
                                     initial={{ filter: "blur(10px)", opacity: 0, y: 10 }}
                                     animate={{ filter: "blur(0px)", opacity: 1, y: 0 }}
-                                    transition={{ duration: 0.4, delay: (4 + index) * 0.05 }}
+                                    transition={{ duration: 0.4, delay: (2 + index) * 0.05 }}
                                     className={cn(
                                         "inline-block",
-                                        word === "English" && "bg-linear-to-r from-primary via-blue-500 to-primary bg-size-[200%_100%] animate-[shimmer_3s_ease-in-out_infinite] text-transparent bg-clip-text"
+                                        word === "Captions" && "bg-linear-to-r from-primary via-blue-500 to-primary bg-size-[200%_100%] animate-[shimmer_3s_ease-in-out_infinite] text-transparent bg-clip-text"
                                     )}
                                     key={index}
                                 >
@@ -650,56 +652,29 @@ const Hero = () => {
                         </Balancer>
                     </p>
 
-                    {/* Buttons */}
+                    {/* CTA Buttons — video upload modal commented out; re-enable to restore interactive hero */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.5, delay: 0.6 }}
                         className={cn("flex items-center gap-4 flex-wrap justify-center mt-8")}
                     >
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="video/*"
-                            className="sr-only"
-                            onChange={handleInputChange}
-                        />
+                        {/* <input ref={fileInputRef} type="file" accept="video/*" className="sr-only" onChange={handleInputChange} /> */}
                         <Button
                             size="lg"
-                            onClick={handleCTAClick}
-                            disabled={appState === "processing"}
+                            onClick={() => router.push(session?.user ? "/dashboard" : "/auth/sign-in")}
                         >
-                            {appState === "processing" ? (
-                                <><Loader2Icon className="size-4 animate-spin mr-2" />Processing…</>
-                            ) : (
-                                <><UploadCloudIcon className="size-4 mr-2" />Upload Video</>
-                            )}
+                            <UploadCloudIcon className="size-4 mr-2" />
+                            Get Started Free
                         </Button>
-                        {appState === "done" ? (
-                            <Button size="lg" variant="outline" onClick={handleReset}>
-                                <RotateCcwIcon className="size-4 mr-2" />New Video
-                            </Button>
-                        ) : (
-                            <Button size="lg" variant="outline" onClick={handleCTAClick} disabled={appState === "processing"}>
-                                <ArrowRightIcon className="size-4 mr-2" />Get Started
-                            </Button>
-                        )}
+                        <Button size="lg" variant="outline" onClick={() => router.push("/auth/sign-in")}>
+                            <ArrowRightIcon className="size-4 mr-2" />
+                            Sign In
+                        </Button>
                     </motion.div>
                 </div>
-                {/* Toast: save success + undo */}
-                {toastVisible && (
-                    <div className="fixed right-6 bottom-6 z-50">
-                        <div className="flex items-center gap-3 bg-card border border-foreground/10 px-4 py-2 rounded-lg shadow-lg">
-                            <div className="text-sm text-foreground">Saved subtitle</div>
-                            <div className="flex items-center gap-2">
-                                <button className="text-xs text-primary underline" onClick={undoEdit}>Undo</button>
-                                <button className="text-xs text-muted-foreground" onClick={() => setToastVisible(false)}>Dismiss</button>
-                            </div>
-                        </div>
-                    </div>
-                )}
 
-                {/* ── Dashboard frame ── */}
+                {/* Dashboard preview card — mirrors sample-hero layout */}
                 <motion.div
                     initial={{ opacity: 0, filter: "blur(20px)", y: 30 }}
                     animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
@@ -709,384 +684,43 @@ const Hero = () => {
                     <div className="relative mx-auto max-w-6xl rounded-2xl md:rounded-[32px] border border-foreground/10 bg-foreground/5 backdrop-blur-lg p-2">
                         <div className="absolute top-1/4 left-1/2 -z-10 w-4/5 h-1/3 -translate-x-1/2 -translate-y-1/2 bg-primary/20 blur-[10rem] opacity-50" />
 
-                        <div
-                            className={cn(
-                                "rounded-lg md:rounded-[24px] border border-foreground/10 bg-background overflow-hidden",
-                                "min-h-[300px] lg:min-h-[480px] flex flex-col"
-                            )}
-                            onDragOver={handleFileDragOver}
-                            onDragLeave={handleFileDragLeave}
-                            onDrop={handleFileDrop}
-                        >
-                            <AnimatePresence mode="wait">
+                        <div className="rounded-lg md:rounded-[24px] border border-foreground/10 bg-background overflow-hidden">
+                            {/* Static dashboard preview image */}
+                            <Image
+                                src="/images/dashboard.jpg"
+                                alt="Tenglish Captions — Dashboard Preview"
+                                width={2896}
+                                height={1804}
+                                priority
+                                className="w-full h-auto"
+                            />
 
-                                {/* ── IDLE: drop zone ── */}
-                                {(appState === "idle" || appState === "ready") && (
-                                    <motion.div
-                                        key="idle"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        exit={{ opacity: 0 }}
-                                        transition={{ duration: 0.25 }}
-                                        className="flex-1 flex flex-col items-center justify-center gap-6 p-8 lg:p-16"
-                                        onClick={handleCTAClick}
-                                        style={{ cursor: "pointer" }}
-                                    >
-                                        <div className={cn(
-                                            "w-full max-w-lg flex flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed py-14 transition-all duration-200",
-                                            isDragging ? "border-primary bg-primary/10 scale-105" : "border-foreground/15 hover:border-primary/40",
-                                            selectedFile ? "border-primary/40 bg-primary/5" : ""
-                                        )}>
-                                            {selectedFile ? (
-                                                <>
-                                                    <div className="p-4 rounded-2xl bg-primary/10 border border-primary/20">
-                                                        <UploadCloudIcon className="size-10 text-primary" />
-                                                    </div>
-                                                    <div className="text-center">
-                                                        <p className="text-sm font-medium text-foreground">{selectedFile.name}</p>
-                                                        <p className="text-xs text-muted-foreground mt-1">{(selectedFile.size / (1024 * 1024)).toFixed(1)} MB · Ready to process</p>
-                                                    </div>
-                                                    <Button
-                                                        size="lg"
-                                                        onClick={(e) => { e.stopPropagation(); handleProcess(); }}
-                                                    >
-                                                        Generate Subtitles
-                                                        <ArrowRightIcon className="size-4 ml-2" />
-                                                    </Button>
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <div className={cn(
-                                                        "p-5 rounded-2xl border transition-colors",
-                                                        isDragging ? "border-primary/40 bg-primary/10" : "border-foreground/10 bg-foreground/5"
-                                                    )}>
-                                                        <UploadCloudIcon className={cn("size-12", isDragging ? "text-primary" : "text-muted-foreground/50")} />
-                                                    </div>
-                                                    <div className="text-center">
-                                                        <p className="text-base font-medium text-foreground">
-                                                            {isDragging ? "Drop your video here" : "Drop your video here"}
-                                                        </p>
-                                                        <p className="text-sm text-muted-foreground mt-1">
-                                                            or <span className="text-primary font-medium">click to browse</span>
-                                                        </p>
-                                                    </div>
-                                                    <p className="text-xs text-muted-foreground/50">MP4 · MOV · AVI · WebM · up to 500 MB</p>
-                                                </>
-                                            )}
-                                        </div>
-                                    </motion.div>
-                                )}
-
-                                {/* ── PROCESSING ── */}
-                                {appState === "processing" && (
-                                    <motion.div
-                                        key="processing"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        exit={{ opacity: 0 }}
-                                        transition={{ duration: 0.25 }}
-                                        className="flex-1 flex flex-col items-center justify-center gap-8 p-8 lg:p-16"
-                                    >
-                                        <div className="w-full max-w-sm space-y-5">
-                                            <p className="text-sm font-semibold text-foreground mb-6">Processing your video…</p>
-                                            {STEPS.map((s, i) => {
-                                                const isCurrent = s.key === processingStep;
-                                                const isDoneStep = i < currentStepIndex || processingStep === "done";
-                                                const isPending = i > currentStepIndex;
-                                                return (
-                                                    <div key={s.key} className="flex items-center gap-3">
-                                                        <div className={cn("shrink-0 size-5", isDoneStep ? "text-primary" : isCurrent ? "text-primary" : "text-muted-foreground/30")}>
-                                                            {isDoneStep && i < STEPS.length - 1 ? (
-                                                                <CheckCircle2Icon className="size-5" />
-                                                            ) : isCurrent ? (
-                                                                <Loader2Icon className="size-5 animate-spin" />
-                                                            ) : (
-                                                                <div className={cn("size-3.5 rounded-full border-2 mx-auto", isPending ? "border-foreground/20" : "border-primary")} />
-                                                            )}
-                                                        </div>
-                                                        <p className={cn("text-sm", isCurrent ? "text-foreground font-medium" : isDoneStep ? "text-foreground/60" : "text-muted-foreground/40")}>
-                                                            {s.label}
-                                                            {isCurrent && s.key === "uploading" && (
-                                                                <span className="ml-2 text-primary">{Math.round(uploadProgress)}%</span>
-                                                            )}
-                                                        </p>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </motion.div>
-                                )}
-
-                                {/* ── ERROR ── */}
-                                {appState === "error" && (
-                                    <motion.div
-                                        key="error"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        exit={{ opacity: 0 }}
-                                        transition={{ duration: 0.25 }}
-                                        className="flex-1 flex flex-col items-center justify-center gap-4 p-8"
-                                    >
-                                        <XCircleIcon className="size-12 text-red-400" />
-                                        <p className="text-sm font-medium text-foreground">Processing failed</p>
-                                        <p className="text-xs text-muted-foreground max-w-xs text-center">{error}</p>
-                                        <Button variant="outline" size="sm" onClick={handleReset}>
-                                            <RotateCcwIcon className="size-3.5 mr-2" />Try again
-                                        </Button>
-                                    </motion.div>
-                                )}
-
-                                {appState === "done" && videoUrl && (
-                                    <motion.div
-                                        key="done"
-                                        initial={{ opacity: 0 }}
-                                        animate={{ opacity: 1 }}
-                                        transition={{ duration: 0.35 }}
-                                        className="flex-1 flex flex-col lg:flex-row overflow-hidden"
-                                    >
-                                        {/* Video pane with custom subtitle overlay */}
-                                        <div ref={videoPaneRef} className="flex-1 bg-black flex items-center justify-center min-h-[260px] lg:min-h-0 relative">
-                                            <video
-                                                ref={videoRef}
-                                                src={videoUrl}
-                                                controls
-                                                onTimeUpdate={handleTimeUpdate}
-                                                onLoadedMetadata={() => {
-                                                    if (videoRef.current) {
-                                                        const nw = videoRef.current.videoWidth;
-                                                        const nh = videoRef.current.videoHeight;
-                                                        if (nw && nh) setVideoAspect(nw / nh);
-                                                    }
-                                                    // pane dimensions are handled by ResizeObserver
-                                                }}
-                                                className="w-full h-full max-h-[480px] object-contain"
-                                            />
-                                            {activeSubtitle && (() => {
-                                                // Constrain subtitle to the actual rendered video rect
-                                                // so it never spills into black bars (portrait/reel).
-                                                // We read the video element's bounding rect directly —
-                                                // this is always accurate regardless of aspect ratio.
-                                                let maxW: string = 'calc(100% - 24px)';
-                                                if (videoRef.current) {
-                                                    const vr = videoRef.current.getBoundingClientRect();
-                                                    const pr = videoPaneRef.current?.getBoundingClientRect();
-                                                    if (vr.width > 0 && videoAspect !== null && pr) {
-                                                        // object-contain: the displayed content width is
-                                                        // min(video-el-width, video-el-height * aspect)
-                                                        const contentW = Math.floor(
-                                                            Math.min(vr.width, vr.height * videoAspect)
-                                                        );
-                                                        maxW = `${Math.max(contentW - 16, 80)}px`;
-                                                    }
-                                                }
-                                                return (
-                                                    <div className="absolute bottom-14 left-0 right-0 flex justify-center pointer-events-none px-2">
-                                                        <span
-                                                            className="text-white font-semibold rounded text-center leading-snug break-words px-3 py-1.5"
-                                                            style={{
-                                                                // Mirror burn-wasm fontsize=52 proportionally.
-                                                                // scale = rendered CSS width / native video width
-                                                                // uiFont = 52 * scale  →  visually identical to download
-                                                                fontSize: (() => {
-                                                                    const v = videoRef.current;
-                                                                    if (v && v.videoWidth > 0 && v.clientWidth > 0) {
-                                                                        const scale = v.clientWidth / v.videoWidth;
-                                                                        const px = Math.round(52 * scale);
-                                                                        return `${Math.max(10, Math.min(px, 18))}px`;
-                                                                    }
-                                                                    return '13px';
-                                                                })(),
-                                                                maxWidth: maxW,
-                                                                background: 'rgba(0,0,0,0.75)',
-                                                                textShadow: '0 1px 3px rgba(0,0,0,0.8)',
-                                                            }}
-                                                        >
-                                                            {activeSubtitle}
-                                                        </span>
-                                                    </div>
-                                                );
-                                            })()}
-                                        </div>
-
-                                        {/* Subtitles pane */}
-                                        <div className="lg:w-80 xl:w-96 border-t lg:border-t-0 lg:border-l border-foreground/10 flex flex-col bg-background">
-                                            <div className="flex items-center justify-between px-4 py-3 border-b border-foreground/10">
-                                                <span className="text-xs font-semibold text-foreground">
-                                                    Subtitles · {segments.length} segments
-                                                </span>
-                                                <div className="flex items-center gap-1">
-                                                    <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        className="h-7 text-xs px-2 gap-1"
-                                                        title="Download transliterated (romanized) subtitles"
-                                                        onClick={() => downloadSrt(srtContent, selectedFile?.name ?? "video")}
-                                                    >
-                                                        <DownloadIcon className="size-3" />SRT
-                                                    </Button>
-                                                    
-                                                    <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        className="h-7 text-xs px-2 gap-1"
-                                                        title="Download video with burned-in subtitles (processed in your browser)"
-                                                        onClick={async () => {
-                                                            if (!videoKey || !srtContent) {
-                                                                return downloadVideo(videoUrl!, selectedFile?.name ?? "video.mp4");
-                                                            }
-                                                            setBurningCaptioned(true);
-                                                            setBurnPhase("Starting…");
-                                                            setBurnPct(0);
-                                                            try {
-                                                                const outputName = (selectedFile?.name ?? 'video').replace(/\.[^/.]+$/, '') + '_subtitled.mp4';
-                                                                await burnSubtitlesWasm(
-                                                                    videoKey,
-                                                                    srtContent,
-                                                                    outputName,
-                                                                    (phase, pct) => {
-                                                                        setBurnPhase(phase);
-                                                                        setBurnPct(pct);
-                                                                    },
-                                                                );
-                                                            } catch (e: unknown) {
-                                                                console.error('wasm burn failed', e);
-                                                                setError((e instanceof Error ? e.message : String(e)) ?? 'Burn failed — please try again');
-                                                            } finally {
-                                                                setBurningCaptioned(false);
-                                                                setBurnPhase("");
-                                                                setBurnPct(0);
-                                                            }
-                                                        }}
-                                                        disabled={burningCaptioned}
-                                                    >
-                                                        {burningCaptioned ? (
-                                                            <>
-                                                                <Loader2Icon className="size-3 mr-1 animate-spin" />
-                                                                <span className="max-w-[100px] truncate">
-                                                                    {burnPhase || 'Working…'}{burnPct > 0 && burnPct < 100 ? ` ${burnPct}%` : ''}
-                                                                </span>
-                                                            </>
-                                                        ) : (
-                                                            <><DownloadIcon className="size-3" />Video</>
-                                                        )}
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                            <div className="flex-1 overflow-y-auto divide-y divide-foreground/5 max-h-[300px] lg:max-h-[480px]">
-                                                {segments.length === 0 ? (
-                                                    <p className="text-xs text-muted-foreground p-4 text-center">No speech detected.</p>
-                                                ) : (
-                                                    segments.map((seg, segIdx) => {
-                                                        const isEditing = editingSegmentId === seg.id;
-                                                        const isTimeEditing = editingTimeSegmentId === seg.id;
-                                                        const isDraggingThis = dragIndex === segIdx;
-                                                        const isDragOver = dragOverIndex === segIdx;
-                                                        return (
-                                                            <div
-                                                                key={seg.id}
-                                                                draggable={!isEditing && !isTimeEditing}
-                                                                onDragStart={() => handleDragStart(segIdx)}
-                                                                onDragOver={(e) => handleDragOver(e, segIdx)}
-                                                                onDrop={() => handleDrop(segIdx)}
-                                                                onDragEnd={handleDragEnd}
-                                                                className={cn(
-                                                                    "group relative flex items-start gap-2 px-3 py-2.5 transition-all duration-150",
-                                                                    isDraggingThis && "opacity-40",
-                                                                    isDragOver && !isDraggingThis && "border-t-2 border-primary",
-                                                                    !isEditing && !isTimeEditing && "hover:bg-foreground/[0.03] cursor-grab active:cursor-grabbing",
-                                                                )}
-                                                            >
-                                                                {/* Drag handle — always visible on hover */}
-                                                                <GripVerticalIcon className="size-3 mt-1 shrink-0 text-muted-foreground/20 group-hover:text-muted-foreground/50 transition-colors" />
-
-                                                                {/* Timestamp — click to edit time */}
-                                                                {isTimeEditing ? (
-                                                                    <div className="flex flex-col gap-2 flex-1">
-                                                                        <div className="flex items-center gap-2 w-full flex-wrap">
-                                                                            <div className="flex items-center gap-1">
-                                                                                <button onClick={() => adjustTimeText(true, -0.1)} title="-0.1s" className="text-xs px-1.5 py-0.5 rounded bg-foreground/5 hover:bg-foreground/10">-</button>
-                                                                                <input value={timeStartText} onChange={(e) => setTimeStartText(e.target.value)} className="text-xs p-1 rounded border border-foreground/10 w-[4.5rem] font-mono" />
-                                                                                <button onClick={() => adjustTimeText(true, 0.1)} title="+0.1s" className="text-xs px-1.5 py-0.5 rounded bg-foreground/5 hover:bg-foreground/10">+</button>
-                                                                            </div>
-                                                                            <span className="text-xs text-muted-foreground">→</span>
-                                                                            <div className="flex items-center gap-1">
-                                                                                <button onClick={() => adjustTimeText(false, -0.1)} title="-0.1s" className="text-xs px-1.5 py-0.5 rounded bg-foreground/5 hover:bg-foreground/10">-</button>
-                                                                                <input value={timeEndText} onChange={(e) => setTimeEndText(e.target.value)} className="text-xs p-1 rounded border border-foreground/10 w-[4.5rem] font-mono" />
-                                                                                <button onClick={() => adjustTimeText(false, 0.1)} title="+0.1s" className="text-xs px-1.5 py-0.5 rounded bg-foreground/5 hover:bg-foreground/10">+</button>
-                                                                            </div>
-                                                                        </div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <button onClick={() => saveEditTime(seg.id)} title="Save" className="p-1 bg-primary/10 hover:bg-primary/20 rounded text-primary">
-                                                                                <SaveIcon className="size-3" />
-                                                                            </button>
-                                                                            <button onClick={cancelEditTime} title="Cancel" className="p-1 rounded text-muted-foreground hover:text-foreground">
-                                                                                <XIcon className="size-3" />
-                                                                            </button>
-                                                                        </div>
-                                                                    </div>
-                                                                ) : (
-                                                                    <>
-                                                                        {/* Timestamp pill — hover underline signals it's clickable */}
-                                                                        <span
-                                                                            className="text-xs text-muted-foreground/50 font-mono mt-0.5 shrink-0 w-12 cursor-pointer hover:text-primary hover:underline decoration-dotted transition-colors"
-                                                                            title="Click to edit timing"
-                                                                            onClick={() => !isEditing && startEditTime(seg)}
-                                                                        >
-                                                                            {formatTime(seg.start)}
-                                                                        </span>
-
-                                                                        <div className="flex-1 min-w-0">
-                                                                            {isEditing ? (
-                                                                                <textarea
-                                                                                    autoFocus
-                                                                                    value={editText}
-                                                                                    onChange={(e) => setEditText(e.target.value)}
-                                                                                    onKeyDown={(e) => {
-                                                                                        if (e.key === 'Enter' && !e.shiftKey) {
-                                                                                            e.preventDefault();
-                                                                                            // Split the subtitle at the cursor position
-                                                                                            const cursor = (e.currentTarget as HTMLTextAreaElement).selectionStart ?? editText.length;
-                                                                                            splitSegment(seg, segIdx, cursor);
-                                                                                        } else if (e.key === 'Escape') {
-                                                                                            cancelEdit();
-                                                                                        }
-                                                                                    }}
-                                                                                    onBlur={() => {
-                                                                                        // Skip auto-save when a split just fired (split handles persistence itself)
-                                                                                        if (!splitInProgressRef.current) saveEdit(seg.id);
-                                                                                    }}
-                                                                                    className="w-full text-xs p-1 rounded border border-primary/40 resize-none bg-background focus:outline-none focus:ring-1 focus:ring-primary/30"
-                                                                                    rows={2}
-                                                                                />
-                                                                            ) : (
-                                                                                <p
-                                                                                    className="text-xs text-foreground/90 leading-relaxed rounded px-1.5 py-0.5 -mx-1.5 cursor-text group-hover:bg-foreground/5 hover:!bg-foreground/10 transition-colors select-none"
-                                                                                    title="Click to edit"
-                                                                                    onClick={() => startEdit(seg)}
-                                                                                >
-                                                                                    {seg.text}
-                                                                                </p>
-                                                                            )}
-                                                                        </div>
-                                                                    </>
-                                                                )}
-                                                            </div>
-                                                        );
-                                                    })
-                                                )}
-                                            </div>
-                                        </div>
-                                    </motion.div>
-                                )}
-
-                            </AnimatePresence>
+                            {/*
+                             * Interactive upload widget — commented out for now.
+                             * Remove the Image above and un-comment this block to re-enable
+                             * the full hero upload + subtitle-editor experience.
+                             *
+                             * <div
+                             *   className="min-h-[300px] lg:min-h-[480px] flex flex-col"
+                             *   onDragOver={handleFileDragOver}
+                             *   onDragLeave={handleFileDragLeave}
+                             *   onDrop={handleFileDrop}
+                             * >
+                             *   ... (full AnimatePresence state machine was here)
+                             * </div>
+                             */}
                         </div>
                     </div>
 
+                    {/* Bottom fade-out gradient */}
+                    <div className="absolute inset-x-0 bottom-0 z-20 w-full h-3/4 bg-linear-to-t from-background to-background/0 from-10% pointer-events-none" />
+
+                    {/* Top glow */}
                     <div className="absolute top-0 inset-x-0 w-3/5 mx-auto h-1/10 rounded-full bg-primary blur-[4rem] opacity-40 -z-10" />
 
-                    {appState !== "done" && badges.map((b, i) => (
-                        <FloatingBadge key={i} text={b.text} top={b.top} left={b.left} right={b.right} index={i} />
+                    {/* Floating badges */}
+                    {badges.map((b, index) => (
+                        <FloatingBadge key={index} text={b.text} top={b.top} left={b.left} right={b.right} index={index} />
                     ))}
                 </motion.div>
             </Wrapper>

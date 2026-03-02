@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { connectDB } from "@/lib/db";
 import VideoJob from "@/models/video-job";
 
 export const runtime = "nodejs";
 
-async function requireAdmin(request: NextRequest) {
-    const session = await auth.api.getSession({ headers: request.headers });
+async function requireAdmin() {
+    const session = await auth.api.getSession({ headers: await headers() });
     if (!session?.user) return null;
     const role = (session.user as any).role;
     if (role !== "admin") return null;
@@ -16,7 +17,7 @@ async function requireAdmin(request: NextRequest) {
 /** GET /api/admin/users — list all users with their video stats */
 export async function GET(request: NextRequest) {
     try {
-        const session = await requireAdmin(request);
+        const session = await requireAdmin();
         if (!session) {
             return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }

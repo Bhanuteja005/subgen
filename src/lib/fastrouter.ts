@@ -12,8 +12,16 @@ const client = new OpenAI({
     maxRetries: 0,    // no silent retries — fail fast with a clear message
 });
 
-// Gemini 3.1 Pro Preview: multimodal (audio/text), better token efficiency, 1M context
-const TRANSCRIPTION_MODEL = "google/gemini-3.1-pro-preview";
+/**
+ * Model cascade — tried in order. Only the second model is tried if the first
+ * returns a 503 / "overloaded" error.
+ *   [0] google/gemini-2.0-flash         — primary (fast, highly available)
+ *   [1] google/gemini-3.1-pro-preview   — fallback (best quality, used only if flash is overloaded)
+ */
+const MODEL_CASCADE = [
+    "google/gemini-2.0-flash",
+    "google/gemini-3.1-pro-preview",
+] as const;
 
 export interface TranscriptionSegment {
     id: number;
@@ -25,20 +33,56 @@ export interface TranscriptionSegment {
 
 /**
  * Transcribes audio and returns subtitle segments.
- * Uses Gemini 3.1 Pro Preview via FastRouter — handles Telugu + English natively.
- * Transcription and transliteration are done in a single API call.
+ * Tries models in MODEL_CASCADE order — if a model returns 503 / overloaded the
+ * next model is used automatically, so the user never sees a "model busy" failure.
  */
 export async function transcribeTeluguAudio(
     audioFilePath: string
 ): Promise<TranscriptionSegment[]> {
     const audioBuffer = fs.readFileSync(audioFilePath);
     const base64Audio = audioBuffer.toString("base64");
-    console.log(`[FastRouter] sending ${(audioBuffer.length / 1024).toFixed(0)} KB audio to ${TRANSCRIPTION_MODEL}`);
 
+    let lastError: unknown;
+
+    for (const model of MODEL_CASCADE) {
+        console.log(`[FastRouter] trying model ${model} | audio ${(audioBuffer.length / 1024).toFixed(0)} KB`);
+        try {
+            const segments = await callModel(model, base64Audio);
+            console.log(`[FastRouter] success with model ${model} — ${segments.length} segments`);
+            return segments;
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const isOverloaded =
+                msg.includes("503") ||
+                msg.includes("UNAVAILABLE") ||
+                msg.includes("high demand") ||
+                msg.includes("overloaded") ||
+                msg.toLowerCase().includes("no available model provider") ||
+                msg.toLowerCase().includes("meets your routing requirements") ||
+                msg.toLowerCase().includes("no available");
+            if (isOverloaded) {
+                console.warn(`[FastRouter] model ${model} overloaded — trying next model…`);
+                lastError = err;
+                continue; // try next model
+            }
+            // Non-503 error (auth, balance, timeout) — don't fallback, surface immediately
+            throw err;
+        }
+    }
+
+    // All models exhausted
+    const msg = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(`[FastRouter] All models in cascade are overloaded. Last error: ${msg}`);
+}
+
+/**
+ * Internal: calls a specific model and returns parsed segments.
+ */
+async function callModel(model: string, base64Audio: string): Promise<TranscriptionSegment[]> {
     let response;
     try {
         response = await client.chat.completions.create({
-            model: TRANSCRIPTION_MODEL,
+            model,
             messages: [
             {
                 role: "user",

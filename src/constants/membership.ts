@@ -6,44 +6,21 @@ export const pricingPlans = [
             monthly: 0,
             yearly: 0
         },
-        description: "Perfect for creators and students who need occasional Telugu subtitles",
+        description: "Everything you need to add captions to your videos — completely free.",
         features: [
-            { text: "5 videos per month", highlighted: false },
-            { text: "Up to 10 min per video", highlighted: false },
-            { text: "SRT file download", highlighted: false },
-            { text: "Telugu transliteration", highlighted: false },
-            { text: "Cloud storage (1 hour)", highlighted: false },
-            { text: "Community Support", highlighted: false }
+            { text: "Unlimited videos per month", highlighted: true },
+            { text: "Up to 90 seconds per video", highlighted: false },
+            { text: "3 caption styles to choose from", highlighted: true },
+            { text: "Download captioned video", highlighted: true },
+            { text: "Download SRT file", highlighted: false },
+            { text: "No credit card required", highlighted: false }
         ],
         cta: {
             text: "Start Free",
-            href: "#"
-        },
-        popular: false
-    },
-    {
-        id: 2,
-        name: "Pro",
-        price: {
-            monthly: 12,
-            yearly: 99
-        },
-        description: "For content creators and media professionals who subtitle regularly",
-        features: [
-            { text: "Unlimited videos", highlighted: true },
-            { text: "Videos up to 2 hours", highlighted: true },
-            { text: "SRT & VTT download", highlighted: true },
-            { text: "Priority AI processing", highlighted: true },
-            { text: "Batch processing", highlighted: true },
-            { text: "24/7 priority support", highlighted: true }
-        ],
-        cta: {
-            text: "Get Pro",
-            href: "#"
+            href: "/auth/sign-in"
         },
         popular: true,
-        badge: "POPULAR",
-        yearlyDiscount: "2 months free"
+        badge: "FREE FOREVER"
     }
 ];
 

@@ -5,7 +5,6 @@ import SectionBadge from '@/components/ui/section-badge';
 import { testimonials } from '@/constants/testimonials';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import Image from 'next/image';
 import { useState, useEffect } from 'react';
 
 const WallOfLove = () => {
@@ -67,9 +66,9 @@ const WallOfLove = () => {
                         viewport={{ once: true }}
                         transition={{ duration: 0.6, delay: 0.2 }}
                     >
-                        Loved by Telugu
+                        Loved by creators
                         <br />
-                        content creators
+                        everywhere
                     </motion.h2>
 
                     <motion.p
@@ -79,7 +78,7 @@ const WallOfLove = () => {
                         viewport={{ once: true }}
                         transition={{ duration: 0.6, delay: 0.3 }}
                     >
-                        See what Telugu creators and producers are saying about SubGen
+                        See what creators and producers are saying about SubGen
                     </motion.p>
                 </div>
 
@@ -96,18 +95,7 @@ const WallOfLove = () => {
                                 transition={{ duration: 0.3, ease: 'easeOut' }}
                                 className="relative flex flex-col items-center text-center"
                             >
-                                <div className="relative mt-0 md:mt-2">
-                                    <div className="hidden lg:block absolute inset-0 bg-primary/20 rounded-full blur-xl" />
-                                    <Image
-                                        src={currentTestimonial.avatar}
-                                        alt={currentTestimonial.name}
-                                        width={80}
-                                        height={80}
-                                        className="relative size-20 rounded-full object-cover border-2 border-primary/20"
-                                    />
-                                </div>
-
-                                <p className="text-base md:text-lg lg:text-xl text-foreground/90 text-balance leading-relaxed mt-6 max-w-full md:max-w-xl lg:max-w-2xl">
+                                <p className="text-base md:text-lg lg:text-xl text-foreground/90 text-balance leading-relaxed mt-4 max-w-full md:max-w-xl lg:max-w-2xl">
                                     "{currentTestimonial.text}"
                                 </p>
 

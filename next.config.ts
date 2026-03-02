@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "pub-cde29cc006ad49e9a43de447ef681306.r2.dev",
       },
+      {
+        protocol: "https",
+        hostname: "lh3.googleusercontent.com",
+      },
     ],
   },
   // Prevent Next.js from bundling native binaries — they must resolve at runtime

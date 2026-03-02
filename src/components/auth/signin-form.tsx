@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { signIn } from "@/lib/auth-client";
+import { signIn, useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +20,15 @@ const GoogleIcon = () => (
 
 const SignInForm = () => {
     const isLoaded = true;
+    const router = useRouter();
+    const { data: session, isPending } = useSession();
+
+    // If the user is already signed in, redirect to dashboard
+    useEffect(() => {
+        if (!isPending && session?.user) {
+            router.replace("/dashboard");
+        }
+    }, [session, isPending, router]);
 
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");

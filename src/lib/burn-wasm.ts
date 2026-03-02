@@ -178,7 +178,7 @@ function parseSrt(srt: string): Cue[] {
  * (documented in ffmpeg-filters.html#Filtering-Guide).  between() is a real
  * libavutil eval function; step() is NOT.
  */
-function buildFilter(cues: Cue[]): { vfFilter: string; cueFiles: string[] } {
+function buildFilter(cues: Cue[], style: CaptionStyle = "default"): { vfFilter: string; cueFiles: string[] } {
     const segments: string[] = [];
     const cueFiles: string[] = [];
 
@@ -187,14 +187,31 @@ function buildFilter(cues: Cue[]): { vfFilter: string; cueFiles: string[] } {
         const fname = `cue_${i}.txt`;
         cueFiles.push(fname);
 
+        let styleProps: string;
+        if (style === "plain") {
+            styleProps =
+                `:fontsize=20` +
+                `:fontcolor=white`;
+        } else if (style === "outline") {
+            styleProps =
+                `:fontsize=20` +
+                `:fontcolor=white` +
+                `:borderw=3` +
+                `:bordercolor=black`;
+        } else {
+            // default — box
+            styleProps =
+                `:fontsize=20` +
+                `:fontcolor=white` +
+                `:box=1` +
+                `:boxcolor=black@0.75` +
+                `:boxborderw=10`;
+        }
+
         segments.push(
             `drawtext=fontfile=font.ttf` +
             `:textfile=${fname}` +
-            `:fontsize=52` +
-            `:fontcolor=white` +
-            `:box=1` +
-            `:boxcolor=black@0.75` +
-            `:boxborderw=10` +
+            styleProps +
             `:x=(w-text_w)/2` +
             `:y=h-text_h-80` +
             `:enable=between(t\\,${start.toFixed(3)}\\,${end.toFixed(3)})`
@@ -205,18 +222,26 @@ function buildFilter(cues: Cue[]): { vfFilter: string; cueFiles: string[] } {
     return { vfFilter: segments.join(","), cueFiles };
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Caption Styles ───────────────────────────────────────────────────────────
+
+/** Visual style of burnt-in captions.
+ * - "default": white text with semi-transparent black background box
+ * - "plain": white text only, no background
+ * - "outline": white text with black border/stroke, no background
+ */
+export type CaptionStyle = "default" | "plain" | "outline";
 
 export async function burnSubtitlesWasm(
     videoKey: string,
     srtContent: string,
     outputFilename: string,
     onProgress?: (phase: string, pct: number) => void,
+    captionStyle: CaptionStyle = "default",
 ): Promise<void> {
     // 1. Parse SRT (pure JS – fail fast before any network/wasm work) ──────────
     const cues = parseSrt(srtContent);
     if (cues.length === 0) throw new Error("SRT has no parseable cues.");
-    const { vfFilter, cueFiles } = buildFilter(cues);
+    const { vfFilter, cueFiles } = buildFilter(cues, captionStyle);
 
     // 2. Download video + font in parallel ─────────────────────────────────────
     onProgress?.("Downloading…", 0);

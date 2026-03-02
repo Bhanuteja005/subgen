@@ -1,18 +1,18 @@
 export const WORKFLOW_STEPS = [
     {
         number: "1",
-        title: "Upload",
-        description: "Drag and drop your Telugu video file directly in the browser — no software installation needed",
+        title: "Upload Video",
+        description: "Sign in and drag & drop your video — no app to install, works on any device.",
     },
     {
         number: "2",
-        title: "AI Process",
-        description: "Our Whisper AI extracts the audio and transcribes Telugu speech with precise timestamps",
+        title: "Get Captions",
+        description: "See word-accurate Tenglish captions appear on your video in seconds.",
     },
     {
         number: "3",
         title: "Download",
-        description: "Get your transliterated subtitle file in SRT or VTT format ready for any video editor",
+        description: "Pick your caption style and download the final video or SRT file instantly.",
     },
 ];
 
