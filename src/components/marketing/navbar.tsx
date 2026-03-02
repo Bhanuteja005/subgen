@@ -59,7 +59,7 @@ const Navbar = () => {
                         </div>
 
                         <div className="flex items-center gap-2 lg:gap-3">
-                            <Link href={Routes.Dashboard}>
+                            <Link href="/auth/sign-in">
                                 <Button variant="white" className="hidden lg:flex">
                                     Try Free
                                 </Button>

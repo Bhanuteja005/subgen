@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
 
 // Routes that require login
 const PROTECTED_PATHS = ["/dashboard", "/admin"];
@@ -10,11 +8,15 @@ const AUTH_PATHS = ["/auth/sign-in", "/auth/sign-up"];
 export async function middleware(req: NextRequest) {
     const { pathname } = req.nextUrl;
 
-    // Get session without importing heavy next/headers — use the request headers
+    // Resolve session by calling the Node.js auth API route so middleware
+    // doesn't import Node-only modules (middleware runs on the edge).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let session: any = null;
     try {
-        session = await auth.api.getSession({ headers: await headers() });
+        const url = new URL("/api/auth/get-session", req.url).toString();
+        const resp = await fetch(url, { method: "GET", headers: req.headers, cache: "no-store" });
+        if (resp.ok) session = await resp.json();
+        else session = null;
     } catch {
         session = null;
     }
