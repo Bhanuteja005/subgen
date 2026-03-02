@@ -165,7 +165,7 @@ function StatusBadge({ status }: { status: VideoJob["status"] }) {
             status === "processing" && "bg-yellow-500/10 text-yellow-400",
             status === "error"      && "bg-red-500/10 text-red-400",
         )}>
-            {status === "processing" && <Loader2Icon className="size-3 animate-spin" />}
+            {status === "processing" && <Loader2Icon className="size-3.5 animate-spin" />}
             {status === "done"       && <span className="size-1.5 rounded-full bg-green-400 inline-block" />}
             {status === "error"      && <span className="size-1.5 rounded-full bg-red-400 inline-block" />}
             {status}
@@ -1144,10 +1144,12 @@ const Dashboard = () => {
         feedback:  "Feedback",
     };
 
+    const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
     return (
         <div className="flex h-screen bg-background text-foreground overflow-hidden">
-            {/* ── Sidebar ── */}
-            <aside className="w-60 shrink-0 flex flex-col border-r border-foreground/10 bg-foreground/[0.02]">
+            {/* ── Sidebar ── (hidden on small screens) */}
+            <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-foreground/10 bg-black text-white">
                 {/* Logo */}
                 <div className="h-14 flex items-center px-5 border-b border-foreground/10">
                     <Icons.wordmark className="h-5 w-auto text-foreground" />
@@ -1158,7 +1160,7 @@ const Dashboard = () => {
                     {navItems.map((item) => {
                         const Icon = item.icon;
                         const active = activeSection === item.id;
-                        return (
+                                return (
                             <button
                                 key={item.id}
                                 onClick={() => setActiveSection(item.id)}
@@ -1166,7 +1168,7 @@ const Dashboard = () => {
                                     "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all",
                                     active
                                         ? "bg-primary/10 text-primary"
-                                        : "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+                                        : "text-white/70 hover:bg-white/5 hover:text-white"
                                 )}
                             >
                                 <Icon className="size-4 shrink-0" />
@@ -1203,7 +1205,7 @@ const Dashboard = () => {
                     </div>
                     <button
                         onClick={handleLogout}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
                     >
                         <LogOutIcon className="size-3.5" />
                         Sign out
@@ -1211,36 +1213,104 @@ const Dashboard = () => {
                 </div>
             </aside>
 
+            {/* Mobile nav drawer */}
+            {mobileNavOpen && (
+                <div className="md:hidden fixed inset-0 z-50">
+                    <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
+                    <div className="absolute left-0 top-0 bottom-0 w-72 bg-black text-white border-r border-foreground/10 p-4 flex flex-col">
+                        <div className="h-14 flex items-center px-3 border-b border-foreground/10">
+                            <Icons.wordmark className="h-5 w-auto text-foreground" />
+                        </div>
+                        <nav className="mt-4 space-y-2 overflow-y-auto flex-1">
+                            {navItems.map(item => {
+                                const Icon = item.icon;
+                                const active = activeSection === item.id;
+                                    return (
+                                    <button key={item.id} onClick={() => { setActiveSection(item.id); setMobileNavOpen(false); }} className={cn(
+                                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all text-left",
+                                        active ? "bg-primary/10 text-primary" : "text-white/70 hover:bg-white/5 hover:text-white"
+                                    )}>
+                                        <Icon className="size-4 shrink-0" />
+                                        {item.label}
+                                    </button>
+                                );
+                            })}
+                        </nav>
+                        <div className="border-t border-foreground/10 mt-4 pt-3">
+                            {isAdmin && (
+                                <button
+                                    onClick={() => { router.push("/admin"); setMobileNavOpen(false); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-white/70 hover:text-white hover:bg-white/5 mb-2"
+                                >
+                                    <ShieldAlertIcon className="size-4" />
+                                    Admin Panel
+                                </button>
+                            )}
+                            <div className="flex items-center gap-3 px-2 py-1.5">
+                                <UserAvatar imageUrl={userImage} name={userName} />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium truncate leading-tight text-white">{userName ?? "User"}</p>
+                                    <p className="text-xs text-white/70 truncate">{session?.user?.email ?? ""}</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => { setMobileNavOpen(false); handleLogout(); }}
+                                className="w-full mt-2 px-3 py-2 rounded-lg text-sm font-medium text-white/80 hover:text-red-400 hover:bg-red-500/10"
+                            >
+                                <LogOutIcon className="size-4 inline-block mr-2" />
+                                Sign out
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* ── Main area ── */}
             <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Header */}
-                <header className="h-14 shrink-0 border-b border-foreground/10 bg-background flex items-center justify-between px-6">
-                    {/* Breadcrumb */}
-                    <div className="flex items-center gap-1.5 text-sm">
-                        <span className="text-muted-foreground">Dashboard</span>
-                        <span className="text-muted-foreground">/</span>
-                        <span className="font-medium">{sectionTitle[activeSection]}</span>
-                    </div>
-
-                    {/* Right controls */}
-                    <div className="flex items-center gap-3">
-                        {/* Search (cosmetic) */}
-                        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-foreground/10 bg-foreground/[0.03] text-muted-foreground text-sm w-48">
-                            <SearchIcon className="size-3.5 shrink-0" />
-                            <span className="text-xs">Search…</span>
+                    <header className="h-14 shrink-0 border-b border-foreground/10 bg-background flex items-center justify-between px-6 relative">
+                        {/* Left */}
+                        <div className="flex items-center">
+                            <div className="md:hidden flex items-center mr-2">
+                                <button onClick={() => setMobileNavOpen(true)} className="p-2 rounded-lg hover:bg-foreground/[0.06]">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 5h14a1 1 0 010 2H3a1 1 0 010-2zm0 4h14a1 1 0 010 2H3a1 1 0 010-2zm0 4h14a1 1 0 010 2H3a1 1 0 010-2z" clipRule="evenodd" /></svg>
+                                </button>
+                            </div>
                         </div>
 
-                        {/* Bell */}
-                        <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors relative">
-                            <BellIcon className="size-4" />
-                        </button>
+                        {/* Center */}
+                        <div className="hidden md:flex items-center gap-1.5 text-sm">
+                            <span className="text-muted-foreground">Dashboard</span>
+                            <span className="text-muted-foreground">/</span>
+                            <span className="font-medium">{sectionTitle[activeSection]}</span>
+                        </div>
 
-                        <UserAvatar imageUrl={userImage} name={userName} />
-                    </div>
-                </header>
+                        {/* Mobile centered logo */}
+                        <div className="md:hidden absolute left-1/2 transform -translate-x-1/2">
+                            <Icons.wordmark className="h-5 w-auto text-foreground" />
+                        </div>
+
+                        {/* Right */}
+                        <div className="flex items-center gap-3">
+                            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-foreground/10 bg-foreground/[0.03] text-muted-foreground text-sm w-48">
+                                <SearchIcon className="size-3.5 shrink-0" />
+                                <span className="text-xs">Search…</span>
+                            </div>
+
+                            <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06] transition-colors relative">
+                                <BellIcon className="size-4" />
+                            </button>
+
+                            <UserAvatar imageUrl={userImage} name={userName} />
+                        </div>
+                    </header>
 
                 {/* Page content */}
                 <main className="flex-1 overflow-y-auto p-6">
+                    {/* Mobile: on-screen section title (shown in content, not top-bar) */}
+                    <div className="md:hidden mb-4">
+                        <h2 className="text-lg font-semibold">{sectionTitle[activeSection]}</h2>
+                    </div>
                     <AnimatePresence mode="wait">
                         {activeSection === "dashboard" && (
                             <motion.div
