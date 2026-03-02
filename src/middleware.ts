@@ -18,24 +18,32 @@ export async function middleware(req: NextRequest) {
         return NextResponse.next();
     }
 
-    // Cookie exists — but it may be stale/expired.
-    // Always validate against the auth API so we never let an invalid session through.
-    let isLoggedIn = false;
+    // Cookie exists — assume authenticated for normal protected pages to avoid
+    // making an internal fetch from Edge middleware (which can fail in some
+    // deployment environments). Only validate admin role by calling the
+    // internal session endpoint when the requested path is under `/admin`.
+    let isLoggedIn = true;
     let isAdmin = false;
-    try {
-        const url = new URL("/api/auth/get-session", req.url).toString();
-        const resp = await fetch(url, {
-            headers: req.headers,
-            cache: "no-store",
-        });
-        if (resp.ok) {
-            const data = await resp.json();
-            isLoggedIn = !!data?.user;
-            isAdmin = data?.user?.role === "admin";
+    if (pathname.startsWith("/admin")) {
+        try {
+            const url = new URL("/api/auth/get-session", req.url).toString();
+            const resp = await fetch(url, {
+                headers: req.headers,
+                cache: "no-store",
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                isLoggedIn = !!data?.user;
+                isAdmin = data?.user?.role === "admin";
+            } else {
+                isLoggedIn = false;
+            }
+        } catch {
+            // If the validation call fails, deny admin access but allow non-admin
+            // pages to proceed based on the presence of the cookie.
+            isLoggedIn = false;
+            isAdmin = false;
         }
-    } catch {
-        // Network error — treat as unauthenticated (safer than allowing through)
-        isLoggedIn = false;
     }
 
     if (PROTECTED_PATHS.some(p => pathname.startsWith(p))) {
