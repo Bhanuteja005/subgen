@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Better Auth sets this cookie when a session exists
-const SESSION_COOKIE = "better-auth.session_token";
+// Better Auth sets this cookie when a session exists. In production the cookie
+// is usually set with the `__Secure-` prefix, so accept both variants.
+const SESSION_COOKIE_NAMES = ["__Secure-better-auth.session_token", "better-auth.session_token"];
 
 // Routes that require login
 const PROTECTED_PATHS = ["/dashboard", "/admin"];
@@ -10,7 +11,8 @@ export async function middleware(req: NextRequest) {
     const { pathname } = req.nextUrl;
 
     // Fast-path: if there is no session cookie at all, skip the API call.
-    const sessionCookie = req.cookies.get(SESSION_COOKIE);
+    // Accept either the secure-prefixed cookie or the plain cookie name.
+    const sessionCookie = SESSION_COOKIE_NAMES.map(n => req.cookies.get(n)).find(c => !!c?.value);
     if (!sessionCookie?.value) {
         if (PROTECTED_PATHS.some(p => pathname.startsWith(p))) {
             return NextResponse.redirect(new URL("/auth/sign-in", req.url));
@@ -48,9 +50,9 @@ export async function middleware(req: NextRequest) {
 
     if (PROTECTED_PATHS.some(p => pathname.startsWith(p))) {
         if (!isLoggedIn) {
-            // Invalid / expired session — clear the stale cookie and redirect to sign-in
+            // Invalid / expired session — clear the stale cookie(s) and redirect to sign-in
             const response = NextResponse.redirect(new URL("/auth/sign-in", req.url));
-            response.cookies.delete(SESSION_COOKIE);
+            for (const name of SESSION_COOKIE_NAMES) response.cookies.delete(name);
             return response;
         }
         // Logged-in but not admin → send to user dashboard
