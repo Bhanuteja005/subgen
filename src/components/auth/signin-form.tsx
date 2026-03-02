@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { signIn } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -19,7 +18,6 @@ const GoogleIcon = () => (
 );
 
 const SignInForm = () => {
-    const router = useRouter();
     const isLoaded = true;
 
     const [email, setEmail] = useState("");
@@ -44,7 +42,8 @@ const SignInForm = () => {
             if (result?.error) {
                 toast.error(result.error.message ?? "Invalid email or password");
             } else {
-                router.push("/auth/auth-callback");
+                // Hard navigation so the browser sends the fresh session cookie
+                window.location.href = "/dashboard";
             }
         } catch (err: any) {
             toast.error("An error occurred. Please try again.");

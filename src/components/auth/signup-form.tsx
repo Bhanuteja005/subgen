@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { signUp, signIn } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -19,7 +18,6 @@ const GoogleIcon = () => (
 );
 
 const SignUpForm = () => {
-    const router = useRouter();
     const isLoaded = true;
 
     const [name, setName] = useState("");
@@ -47,7 +45,8 @@ const SignUpForm = () => {
                 toast.error(result.error.message ?? "Sign up failed.");
             } else {
                 toast.success("Account created! Taking you to your dashboard…");
-                router.push("/auth/auth-callback");
+                // Hard navigation so the browser sends the fresh session cookie
+                window.location.href = "/dashboard";
             }
         } catch {
             toast.error("An error occurred. Please try again.");

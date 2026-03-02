@@ -21,7 +21,8 @@ export async function middleware(req: NextRequest) {
         session = null;
     }
 
-    const isLoggedIn = session !== null;
+    // Must check session.user — Better Auth returns 200 with { session:null, user:null } when not authenticated
+    const isLoggedIn = !!session?.user;
     const isAdmin = session?.user?.role === "admin";
 
     // Redirect unauthenticated users away from protected pages
