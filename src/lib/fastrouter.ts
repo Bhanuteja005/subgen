@@ -6,9 +6,11 @@ import fs from "fs";
 const client = new OpenAI({
     apiKey: process.env.FASTROUTER_API_KEY!,
     baseURL: process.env.FASTROUTER_BASE_URL!,
-    // Explicit timeout: throw a clean error before Vercel's 300s gateway kills the function.
-    // This gives us a readable error instead of a silent 504.
-    timeout: 240_000, // 240 seconds
+    // Explicit timeout: throw a clean error before Vercel's gateway kills the function.
+    // Vercel Hobby plan caps serverless functions at 60 s total; we budget 45 s for
+    // the AI call itself, leaving ~15 s for R2 download + ffmpeg extraction.
+    // If you upgrade to Vercel Pro (300 s limit) you can raise this value.
+    timeout: 45_000, // 45 seconds
     maxRetries: 0,    // no silent retries — fail fast with a clear message
 });
 
@@ -19,7 +21,6 @@ const client = new OpenAI({
  *   [1] google/gemini-3.1-pro-preview   — fallback (best quality, used only if flash is overloaded)
  */
 const MODEL_CASCADE = [
-    "google/gemini-2.0-flash",
     "google/gemini-3.1-pro-preview",
 ] as const;
 

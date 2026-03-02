@@ -435,18 +435,40 @@ function UploadPanel({ onDone }: { onDone?: () => void }) {
                 body: JSON.stringify({ key }),
             });
             setProcessingStep("transcribing");
-            if (!processRes.ok) { const d = await processRes.json(); throw new Error(d.error ?? "Processing failed"); }
 
-            const data = await processRes.json();
+            // Safely parse response — Vercel may return an HTML error page (504/502)
+            // instead of JSON when the serverless function times out.
+            let data: Record<string, unknown>;
+            try {
+                data = await processRes.json();
+            } catch {
+                if (processRes.status === 504 || processRes.status === 502 || processRes.status === 524) {
+                    throw new Error("Processing timed out. Your video may be too long for the current plan — try a shorter clip.");
+                }
+                throw new Error(`Server returned an unexpected response (${processRes.status}). Please try again.`);
+            }
+
+            if (!processRes.ok) {
+                throw new Error(
+                    (data.error as string | undefined) ??
+                    `Processing failed with status ${processRes.status}`
+                );
+            }
+
             setProcessingStep("done");
-            setResult({ videoUrl: data.videoUrl, srtContent: data.srtContent, vttContent: data.vttContent, segments: data.segments, key: data.key });
-            setSegments(data.segments ?? []);
-            setCurrentVtt(data.vttContent ?? "");
+            setResult({ videoUrl: data.videoUrl as string, srtContent: data.srtContent as string, vttContent: data.vttContent as string, segments: data.segments as TranscriptionSegment[], key: data.key as string });
+            setSegments((data.segments as TranscriptionSegment[]) ?? []);
+            setCurrentVtt((data.vttContent as string) ?? "");
             setAppState("done");
         } catch (err) {
             const raw = err instanceof Error ? err.message : "An unexpected error occurred";
-            const is503 = raw.includes("503") || raw.includes("high demand") || raw.includes("UNAVAILABLE");
-            setError(is503 ? "The AI model is temporarily overloaded. Please wait a moment and try again." : raw);
+            const is503 = raw.includes("503") || raw.includes("high demand") || raw.includes("UNAVAILABLE") || raw.includes("overloaded");
+            const isTimeout = raw.includes("timed out") || raw.includes("timeout") || raw.includes("too long");
+            setError(
+                is503 ? "The AI model is temporarily overloaded. Please wait a moment and try again." :
+                isTimeout ? "Processing timed out. Try a shorter video clip (under 30 seconds works best)." :
+                raw
+            );
             setAppState("error"); setProcessingStep(null);
         }
     }, [selectedFile]);

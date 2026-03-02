@@ -12,39 +12,8 @@ import { connectDB } from "@/lib/db";
 import VideoJob from "@/models/video-job";
 
 export const runtime = "nodejs";
-// Allow up to 5 minutes for processing
+// 300 s — requires Vercel Pro/Enterprise; on Hobby the cap is 60 s.
 export const maxDuration = 300;
-
-/** Retry a function on 503 / high-demand errors with exponential back-off. */
-async function withRetry<T>(
-    fn: () => Promise<T>,
-    retries = 3,
-    baseDelayMs = 3000
-): Promise<T> {
-    for (let attempt = 0; attempt <= retries; attempt++) {
-        try {
-            return await fn();
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            const is503 =
-                msg.includes("503") ||
-                msg.includes("UNAVAILABLE") ||
-                msg.includes("high demand") ||
-                msg.includes("overloaded");
-            if (is503 && attempt < retries) {
-                const delay = baseDelayMs * (attempt + 1); // 3s, 6s, 9s
-                console.warn(
-                    `AI model overloaded (attempt ${attempt + 1}/${retries + 1}). Retrying in ${delay / 1000}s…`
-                );
-                await new Promise((r) => setTimeout(r, delay));
-                continue;
-            }
-            throw err;
-        }
-    }
-    // Should never reach here
-    throw new Error("withRetry: exhausted all attempts");
-}
 
 export async function POST(request: NextRequest) {
     let videoTempPath: string | null = null;
@@ -121,9 +90,8 @@ export async function POST(request: NextRequest) {
         console.log("Audio extracted to:", audioTempPath);
 
         // Step 3: Transcribe with FastRouter AI (Telugu → transliterated Latin)
-        // Wrap in retry to handle 503 "model overloaded" transient errors
         console.log("Transcribing audio...");
-        const segments = await withRetry(() => transcribeTeluguAudio(audioTempPath!));
+        const segments = await transcribeTeluguAudio(audioTempPath!);
         console.log(`Got ${segments.length} segments`);
 
         // Step 4: Generate SRT and VTT content
