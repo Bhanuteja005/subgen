@@ -21,7 +21,7 @@ const client = new OpenAI({
  *   [1] google/gemini-3.1-pro-preview   — fallback (best quality, used only if flash is overloaded)
  */
 const MODEL_CASCADE = [
-    "google/gemini-3.1-pro-preview",
+    "google/gemini-3-pro-preview",
 ] as const;
 
 export interface TranscriptionSegment {
