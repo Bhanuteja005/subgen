@@ -54,7 +54,8 @@ const SignInForm = () => {
         if (!isLoaded) return;
         setIsGoogleLoading(true);
         try {
-            await signIn.social({ provider: "google", callbackURL: "/auth/auth-callback" });
+            // Go directly to dashboard — no intermediate auth-callback page
+            await signIn.social({ provider: "google", callbackURL: "/dashboard" });
         } catch {
             toast.error("Google sign-in failed.");
             setIsGoogleLoading(false);

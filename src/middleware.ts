@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Better Auth sets this cookie when a session exists
+const SESSION_COOKIE = "better-auth.session_token";
+
 // Routes that require login
 const PROTECTED_PATHS = ["/dashboard", "/admin"];
 // Routes that logged-in users should not see
@@ -8,22 +11,23 @@ const AUTH_PATHS = ["/auth/sign-in", "/auth/sign-up"];
 export async function middleware(req: NextRequest) {
     const { pathname } = req.nextUrl;
 
-    // Resolve session by calling the Node.js auth API route so middleware
-    // doesn't import Node-only modules (middleware runs on the edge).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let session: any = null;
-    try {
-        const url = new URL("/api/auth/get-session", req.url).toString();
-        const resp = await fetch(url, { method: "GET", headers: req.headers, cache: "no-store" });
-        if (resp.ok) session = await resp.json();
-        else session = null;
-    } catch {
-        session = null;
-    }
+    // Check session by reading the cookie directly — no server-side fetch needed.
+    // The cookie is HttpOnly so JS can't read it, but middleware can.
+    const sessionCookie = req.cookies.get(SESSION_COOKIE);
+    const isLoggedIn = !!sessionCookie?.value;
 
-    // Must check session.user — Better Auth returns 200 with { session:null, user:null } when not authenticated
-    const isLoggedIn = !!session?.user;
-    const isAdmin = session?.user?.role === "admin";
+    // For admin role check we still need the API — but only when accessing /admin
+    let isAdmin = false;
+    if (isLoggedIn && pathname.startsWith("/admin")) {
+        try {
+            const url = new URL("/api/auth/get-session", req.url).toString();
+            const resp = await fetch(url, { headers: req.headers, cache: "no-store" });
+            if (resp.ok) {
+                const data = await resp.json();
+                isAdmin = data?.user?.role === "admin";
+            }
+        } catch { /* treat as non-admin */ }
+    }
 
     // Redirect unauthenticated users away from protected pages
     if (PROTECTED_PATHS.some(p => pathname.startsWith(p))) {
