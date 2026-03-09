@@ -17,6 +17,8 @@ interface VideoPlayerProps {
     subtitleFontBase?: number;
     /** Caption visual style matching the 3 burn styles. */
     captionStyle?: "default" | "plain" | "outline";
+    /** Vertical position of subtitle overlay: "bottom" (default) or "top". */
+    subtitlePosition?: "top" | "bottom";
 }
 
 interface Cue {
@@ -76,7 +78,7 @@ function parseVtt(vtt: string): Cue[] {
 // ─── VideoPlayer ──────────────────────────────────────────────────────────────
 
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
-function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, captionStyle = "default" }, ref) {
+function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, captionStyle = "default", subtitlePosition = "bottom" }, ref) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const cuesRef = useRef<Cue[]>([]);
@@ -129,8 +131,12 @@ function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, c
 
         const lineHeight = fontSize * 1.25;
         const padding = Math.max(6, Math.round(10 * scale));
-        const bottomOffset = Math.max(20, Math.round(80 * scale));
-        const blockBottom = canvas.height - bottomOffset;
+        const edgeOffset = Math.max(20, Math.round(80 * scale));
+
+        // Compute block bottom position based on subtitlePosition
+        const blockBottom = subtitlePosition === "top"
+            ? edgeOffset + cue.lines.length * lineHeight + padding * 2
+            : canvas.height - edgeOffset;
 
         let maxWidth = 0;
         for (const line of cue.lines) {
@@ -161,7 +167,7 @@ function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, c
             if (captionStyle === "outline") ctx.strokeText(cue.lines[i], canvas.width / 2, y);
             ctx.fillText(cue.lines[i], canvas.width / 2, y);
         }
-    }, [subtitleFontBase, captionStyle]);
+    }, [subtitleFontBase, captionStyle, subtitlePosition]);
 
     useEffect(() => {
         const video = videoRef.current;

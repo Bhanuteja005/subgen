@@ -178,7 +178,7 @@ function parseSrt(srt: string): Cue[] {
  * (documented in ffmpeg-filters.html#Filtering-Guide).  between() is a real
  * libavutil eval function; step() is NOT.
  */
-function buildFilter(cues: Cue[], style: CaptionStyle = "default"): { vfFilter: string; cueFiles: string[] } {
+function buildFilter(cues: Cue[], style: CaptionStyle = "default", position: "top" | "bottom" = "bottom"): { vfFilter: string; cueFiles: string[] } {
     const segments: string[] = [];
     const cueFiles: string[] = [];
 
@@ -208,12 +208,14 @@ function buildFilter(cues: Cue[], style: CaptionStyle = "default"): { vfFilter: 
                 `:boxborderw=10`;
         }
 
+        const yExpr = position === "top" ? "80" : "h-text_h-80";
+
         segments.push(
             `drawtext=fontfile=font.ttf` +
             `:textfile=${fname}` +
             styleProps +
             `:x=(w-text_w)/2` +
-            `:y=h-text_h-80` +
+            `:y=${yExpr}` +
             `:enable=between(t\\,${start.toFixed(3)}\\,${end.toFixed(3)})`
         );
     }
@@ -237,11 +239,12 @@ export async function burnSubtitlesWasm(
     outputFilename: string,
     onProgress?: (phase: string, pct: number) => void,
     captionStyle: CaptionStyle = "default",
+    subtitlePosition: "top" | "bottom" = "bottom",
 ): Promise<void> {
     // 1. Parse SRT (pure JS – fail fast before any network/wasm work) ──────────
     const cues = parseSrt(srtContent);
     if (cues.length === 0) throw new Error("SRT has no parseable cues.");
-    const { vfFilter, cueFiles } = buildFilter(cues, captionStyle);
+    const { vfFilter, cueFiles } = buildFilter(cues, captionStyle, subtitlePosition);
 
     // 2. Download video + font in parallel ─────────────────────────────────────
     onProgress?.("Downloading…", 0);

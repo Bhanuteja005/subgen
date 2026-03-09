@@ -76,13 +76,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
                 <div className="p-3 border-t border-foreground/10">
                     <button
-                        onClick={() => router.push("/dashboard")}
-                        className="w-full px-3 py-2 rounded-lg flex items-center gap-3 text-sm text-muted-foreground hover:text-foreground hover:bg-foreground/5 transition-colors cursor-pointer mb-1"
-                    >
-                        <LayoutGridIcon className="size-4" />
-                        User Dashboard
-                    </button>
-                    <button
                         onClick={async () => { await signOut(); router.push("/auth/sign-in"); }}
                         className="w-full px-3 py-2 rounded-lg flex items-center gap-3 text-sm text-muted-foreground hover:text-foreground hover:bg-foreground/5 transition-colors cursor-pointer"
                     >
