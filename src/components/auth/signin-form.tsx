@@ -23,10 +23,12 @@ const SignInForm = () => {
     const router = useRouter();
     const { data: session, isPending } = useSession();
 
-    // If the user is already signed in, redirect to dashboard
+    // If the user is already signed in, redirect by role
     useEffect(() => {
         if (!isPending && session?.user) {
-            router.replace("/dashboard");
+            const role = (session.user as any)?.role as string | undefined;
+            if (role === "admin") router.replace("/admin");
+            else router.replace("/dashboard");
         }
     }, [session, isPending, router]);
 
@@ -52,8 +54,9 @@ const SignInForm = () => {
             if (result?.error) {
                 toast.error(result.error.message ?? "Invalid email or password");
             } else {
-                // Hard navigation so the browser sends the fresh session cookie
-                window.location.href = "/dashboard";
+                    // Hard navigation so the browser sends the fresh session cookie
+                    // Let the auth-callback decide final redirect (admin vs user)
+                    window.location.href = "/auth/auth-callback";
             }
         } catch (err: any) {
             toast.error("An error occurred. Please try again.");
@@ -64,8 +67,8 @@ const SignInForm = () => {
         if (!isLoaded) return;
         setIsGoogleLoading(true);
         try {
-            // Go directly to dashboard — no intermediate auth-callback page
-            await signIn.social({ provider: "google", callbackURL: "/dashboard" });
+            // Go through auth-callback so we can route admins to /admin
+            await signIn.social({ provider: "google", callbackURL: "/auth/auth-callback" });
         } catch {
             toast.error("Google sign-in failed.");
             setIsGoogleLoading(false);

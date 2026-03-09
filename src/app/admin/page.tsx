@@ -8,6 +8,7 @@ import {
 import {
     FilmIcon, UsersIcon, ZapIcon, ClockIcon, Loader2Icon,
     TrendingUpIcon, AlertTriangleIcon, LayersIcon, TimerIcon, MessageSquareIcon,
+    IndianRupeeIcon,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,6 +59,16 @@ function fmtDuration(sec: number) {
     if (!sec) return "—";
     const m = Math.floor(sec / 60), s = sec % 60;
     return `${m}m ${s}s`;
+}
+
+// ≈ $1/MTok blended (Gemini pro), at ₹85 per USD
+const INR_PER_TOKEN = 0.000085;
+
+function tokenCostINR(tokens: number): string {
+    if (!tokens) return "₹0.00";
+    const cost = tokens * INR_PER_TOKEN;
+    if (cost >= 1000) return `₹${(cost / 1000).toFixed(2)}k`;
+    return `₹${cost.toFixed(2)}`;
 }
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -161,7 +172,7 @@ export default function AdminAnalyticsPage() {
                 <StatCard icon={UsersIcon}        label="Total Users"          value={stats.totalUsers} />
                 <StatCard icon={FilmIcon}          label="Total Videos"         value={stats.totalVideos}  color="bg-blue-500/10 text-blue-400" />
                 <StatCard icon={ZapIcon}           label="Total Tokens"         value={fmtTokens(stats.totalTokens)} color="bg-yellow-500/10 text-yellow-400" />
-                <StatCard icon={ClockIcon}         label="Avg Duration"         value={stats.avgDurationSeconds > 0 ? avgDuration : "—"} color="bg-purple-500/10 text-purple-400" />
+                <StatCard icon={IndianRupeeIcon}   label="Cost Burned (₹)"      value={tokenCostINR(stats.totalTokens)} color="bg-orange-500/10 text-orange-400" sub="≈ $1/MTok · ₹85 per $" />
             </div>
 
             {/* ── Stat Cards row 2 ── */}

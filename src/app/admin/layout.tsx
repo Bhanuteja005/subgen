@@ -10,14 +10,15 @@ import {
     LogOutIcon,
     Loader2Icon,
     ShieldAlertIcon,
+    LayoutDashboardIcon,
 } from "lucide-react";
 import Icons from "@/components/global/icons";
 import { cn } from "@/utils";
 
 const navItems = [
-    { href: "/admin",         label: "Analytics", icon: LayoutGridIcon },
-    { href: "/admin/users",   label: "Users",     icon: UsersIcon },
-    { href: "/admin/videos",  label: "Videos",    icon: FilmIcon },
+    { href: "/admin",         label: "Admin Dashboard", icon: LayoutDashboardIcon },
+    { href: "/admin/users",   label: "Users",           icon: UsersIcon },
+    { href: "/admin/videos",  label: "Videos",          icon: FilmIcon },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -50,9 +51,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <aside className="w-56 border-r border-foreground/10 flex flex-col shrink-0">
                 <div className="p-4 border-b border-foreground/10">
                     <Icons.wordmark className="h-5 w-auto text-foreground" />
-                    <div className="mt-1 flex items-center gap-1 text-xs text-primary">
+                    <div className="mt-1 flex items-center gap-1 text-xs text-primary font-medium">
                         <ShieldAlertIcon className="size-3" />
-                        <span>Admin Panel</span>
+                        <span>Admin Dashboard</span>
                     </div>
                 </div>
 

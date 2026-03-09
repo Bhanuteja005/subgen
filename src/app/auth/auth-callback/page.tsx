@@ -1,13 +1,42 @@
 "use client";
 
 import { useEffect } from "react";
+import { getSession } from '@/lib/auth-client';
 
 const AuthCallbackPage = () => {
-    // We don't need to wait for the session hook; the cookie has been set by
-    // the /api/auth callback. Redirect immediately so users land in dashboard.
+    // After the auth callback sets the cookie, fetch the session and redirect
+    // admins to the admin area and everyone else to the regular dashboard.
     useEffect(() => {
-        // Hard navigation ensures fresh session cookie is sent to middleware
-        window.location.href = "/dashboard";
+        (async () => {
+            // Sometimes the session role may not be immediately available after
+            // the auth callback writes the cookie. Poll briefly for the role
+            // to avoid routing admins to /dashboard when they should go to /admin.
+            const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+            const maxAttempts = 10;
+            let sess: any = null;
+            for (let i = 0; i < maxAttempts; i++) {
+                try {
+                    sess = await getSession();
+                    const role = (sess?.user as any)?.role as string | undefined;
+                    if (role === "admin") {
+                        window.location.href = "/admin";
+                        return;
+                    }
+                    if (sess?.user && role && role !== "admin") {
+                        // Non-admin user
+                        window.location.href = "/dashboard";
+                        return;
+                    }
+                } catch (e) {
+                    // ignore and retry
+                }
+                await sleep(300);
+            }
+
+            // Final fallback: if we have a session (even without role), send to dashboard
+            if (sess?.user) window.location.href = "/dashboard";
+            else window.location.href = "/auth/sign-in";
+        })();
     }, []);
 
     return (

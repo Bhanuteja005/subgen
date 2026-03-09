@@ -590,7 +590,7 @@ export default function DashboardPage() {
                                     </div>
 
                                     {/* Two-column layout: video + subtitle editor */}
-                                    <div className="flex divide-x divide-foreground/10" style={{ minHeight: "min(520px, calc(100vh - 280px))" }}>
+                                    <div className="flex divide-x divide-foreground/10 overflow-hidden" style={{ height: "min(560px, calc(100vh - 260px))" }}>
                                         {/* Video player */}
                                         <div className="w-[55%] shrink-0 p-4 flex items-start justify-center bg-black/20">
                                             <VideoPlayer
