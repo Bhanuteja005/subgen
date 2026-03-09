@@ -590,9 +590,9 @@ export default function DashboardPage() {
                                     </div>
 
                                     {/* Two-column layout: video + subtitle editor */}
-                                    <div className="flex divide-x divide-foreground/10 overflow-hidden" style={{ height: "min(560px, calc(100vh - 260px))" }}>
+                                    <div className="flex divide-x divide-foreground/10" style={{ height: "min(820px, calc(100vh - 140px))" }}>
                                         {/* Video player */}
-                                        <div className="w-[55%] shrink-0 p-4 flex items-start justify-center bg-black/20">
+                                        <div className="w-[55%] shrink-0 p-4 flex items-center justify-center bg-black/20">
                                             <VideoPlayer
                                                 ref={playerRef}
                                                 videoUrl={result.videoUrl}
@@ -600,7 +600,7 @@ export default function DashboardPage() {
                                                 subtitleFontBase={22}
                                                 captionStyle={captionStyle}
                                                 subtitlePosition={subtitlePosition}
-                                                className="w-full"
+                                                className="w-full h-full"
                                             />
                                         </div>
 

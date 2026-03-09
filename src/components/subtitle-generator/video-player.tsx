@@ -204,14 +204,14 @@ function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, c
                 ref={videoRef}
                 src={videoUrl}
                 controls
-                className="w-full h-auto max-h-[640px] object-contain"
+                className="w-full h-full max-h-[80vh] object-contain"
             />
 
             {/* Canvas overlay — draws subtitles matching the burn style */}
             <canvas
                 ref={canvasRef}
                 className="absolute inset-0 w-full h-full pointer-events-none"
-                style={{ maxHeight: "640px" }}
+                style={{ maxHeight: "80vh" }}
             />
 
             {/* Toggle button */}
