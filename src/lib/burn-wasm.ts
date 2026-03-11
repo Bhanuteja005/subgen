@@ -98,7 +98,7 @@ function parseSrtTime(ts: string): number {
  * horizontal safe-area for vertical videos (≤40 chars per line).
  * drawtext with textfile= treats \n as a hard line break.
  */
-function wrapText(line: string, maxChars = 40): string {
+function wrapText(line: string, maxChars = 28): string {
     const words = line.split(" ");
     const out: string[] = [];
     let cur = "";
@@ -182,6 +182,17 @@ function buildFilter(cues: Cue[], style: CaptionStyle = "default", position: "to
     const segments: string[] = [];
     const cueFiles: string[] = [];
 
+    // Font size: proportional to video height, matching video-player.tsx canvas formula
+    // clamp(16, h*0.042, 64)  — identical to Math.min(64, Math.max(16, h*0.042)) on screen
+    const fontSizeExpr = "min(64\\,max(16\\,h*0.042))";
+
+    // Y position: proportional to video height, matching canvas resolvedYFraction
+    // bottom: bottom of text block at 88% of h  →  y_top = h*0.88 - text_h
+    // top:    bottom of text block at 20% of h  →  y_top = max(h*0.02, h*0.20 - text_h)
+    const yExpr = position === "top"
+        ? "max(h*0.02\\,h*0.20-text_h)"
+        : "h*0.88-text_h";
+
     for (let i = 0; i < cues.length; i++) {
         const { start, end } = cues[i];
         const fname = `cue_${i}.txt`;
@@ -190,25 +201,23 @@ function buildFilter(cues: Cue[], style: CaptionStyle = "default", position: "to
         let styleProps: string;
         if (style === "plain") {
             styleProps =
-                `:fontsize=20` +
+                `:fontsize=${fontSizeExpr}` +
                 `:fontcolor=white`;
         } else if (style === "outline") {
             styleProps =
-                `:fontsize=20` +
+                `:fontsize=${fontSizeExpr}` +
                 `:fontcolor=white` +
                 `:borderw=3` +
                 `:bordercolor=black`;
         } else {
             // default — box
             styleProps =
-                `:fontsize=20` +
+                `:fontsize=${fontSizeExpr}` +
                 `:fontcolor=white` +
                 `:box=1` +
                 `:boxcolor=black@0.75` +
-                `:boxborderw=10`;
+                `:boxborderw=8`;
         }
-
-        const yExpr = position === "top" ? "80" : "h-text_h-80";
 
         segments.push(
             `drawtext=fontfile=font.ttf` +

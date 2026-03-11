@@ -163,6 +163,7 @@ export default function DashboardPage() {
     // Display settings
     const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("default");
     const [subtitlePosition, setSubtitlePosition] = useState<"top" | "bottom">("bottom");
+    const [subtitleYPercent, setSubtitleYPercent] = useState<number>(88);
     const [wordsPerCue, setWordsPerCue] = useState<number>(0); // 0 = no limit
 
     // Burn state
@@ -382,7 +383,7 @@ export default function DashboardPage() {
         try {
             const srt = buildSrtFromSegs(applyWordsPerCue(segments, wordsPerCue));
             const outName = (selectedFile?.name ?? "video").replace(/\.[^/.]+$/, "") + "_subtitled.mp4";
-            await burnSubtitlesWasm(videoKey, srt, outName, (phase, pct) => { setBurnPhase(phase); setBurnPct(pct); }, captionStyle, subtitlePosition);
+            await burnSubtitlesWasm(videoKey, srt, outName, (phase, pct) => { setBurnPhase(phase); setBurnPct(pct); }, captionStyle, subtitleYPercent < 50 ? "top" : "bottom");
         } catch (e) {
             console.error("[burnWasm]", e);
             const a = document.createElement("a");
@@ -390,7 +391,7 @@ export default function DashboardPage() {
             a.download = (selectedFile?.name ?? "video").replace(/\.[^/.]+$/, "") + ".mp4";
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
         } finally { setBurningVideo(false); setBurnPhase(""); setBurnPct(0); }
-    }, [videoKey, segments, selectedFile, captionStyle, subtitlePosition, wordsPerCue]);
+    }, [videoKey, segments, selectedFile, captionStyle, subtitleYPercent, wordsPerCue]);
 
     const handleFeedbackSubmit = useCallback(async () => {
         if (!feedbackMsg.trim()) return;
@@ -534,18 +535,21 @@ export default function DashboardPage() {
                                                 ))}
                                             </div>
 
-                                            {/* Subtitle position toggle */}
-                                            <button
-                                                onClick={() => setSubtitlePosition(p => p === "bottom" ? "top" : "bottom")}
-                                                title={subtitlePosition === "bottom" ? "Move to top" : "Move to bottom"}
-                                                className={cn(
-                                                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all",
-                                                    "border-foreground/10 bg-foreground/[0.03] text-muted-foreground hover:text-foreground hover:bg-foreground/[0.06]"
-                                                )}
-                                            >
-                                                {subtitlePosition === "bottom" ? <ChevronDownIcon className="size-3.5" /> : <ChevronUpIcon className="size-3.5" />}
-                                                <span className="hidden sm:inline">{subtitlePosition === "bottom" ? "Bottom" : "Top"}</span>
-                                            </button>
+                                            {/* Subtitle position slider */}
+                                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-foreground/10 bg-foreground/[0.03]">
+                                                <ChevronUpIcon className="size-3 text-muted-foreground shrink-0" />
+                                                <input
+                                                    type="range"
+                                                    min={5}
+                                                    max={95}
+                                                    step={1}
+                                                    value={subtitleYPercent}
+                                                    onChange={e => setSubtitleYPercent(Number(e.target.value))}
+                                                    title={`Subtitle position: ${subtitleYPercent}%`}
+                                                    className="w-20 accent-primary cursor-pointer"
+                                                />
+                                                <ChevronDownIcon className="size-3 text-muted-foreground shrink-0" />
+                                            </div>
 
                                             {/* Words per cue */}
                                             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-foreground/10 bg-foreground/[0.03]">
@@ -589,23 +593,22 @@ export default function DashboardPage() {
                                         </div>
                                     </div>
 
-                                    {/* Two-column layout: video + subtitle editor */}
-                                    <div className="flex divide-x divide-foreground/10" style={{ height: "min(820px, calc(100vh - 140px))" }}>
+                                    {/* Two-column layout on desktop, stacked on mobile */}
+                                    <div className="flex flex-col lg:flex-row lg:divide-x lg:divide-foreground/10" style={{ minHeight: "min(600px, calc(100vh - 160px))", maxHeight: "min(880px, calc(100vh - 140px))" }}>
                                         {/* Video player */}
-                                        <div className="w-[55%] shrink-0 p-4 flex items-center justify-center bg-black/20">
+                                        <div className="lg:w-[55%] shrink-0 p-3 lg:p-4 flex items-center justify-center bg-black/20 min-h-[260px] lg:min-h-0">
                                             <VideoPlayer
                                                 ref={playerRef}
                                                 videoUrl={result.videoUrl}
                                                 vttContent={currentVtt}
-                                                subtitleFontBase={22}
                                                 captionStyle={captionStyle}
-                                                subtitlePosition={subtitlePosition}
+                                                subtitleYPercent={subtitleYPercent}
                                                 className="w-full h-full"
                                             />
                                         </div>
 
                                         {/* Subtitle editor */}
-                                        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                                        <div className="flex-1 flex flex-col min-w-0 overflow-hidden min-h-[260px] lg:min-h-0 border-t border-foreground/10 lg:border-t-0">
                                             <div className="px-4 py-2.5 border-b border-foreground/10 flex items-center justify-between shrink-0 bg-foreground/[0.01]">
                                                 <span className="text-xs font-medium text-muted-foreground">Subtitle Editor</span>
                                                 <span className="text-[10px] text-muted-foreground/40 hidden lg:block">

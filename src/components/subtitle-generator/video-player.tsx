@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
-import { SubtitlesIcon } from "lucide-react";
+import { SubtitlesIcon, Maximize2Icon } from "lucide-react";
 import { cn } from "@/utils";
 
 export interface VideoPlayerHandle {
@@ -19,6 +19,11 @@ interface VideoPlayerProps {
     captionStyle?: "default" | "plain" | "outline";
     /** Vertical position of subtitle overlay: "bottom" (default) or "top". */
     subtitlePosition?: "top" | "bottom";
+    /**
+     * Vertical position as a percentage (0 = very top, 100 = very bottom).
+     * When provided, overrides subtitlePosition. Default 88.
+     */
+    subtitleYPercent?: number;
 }
 
 interface Cue {
@@ -43,7 +48,7 @@ function parseVttTime(ts: string): number {
     return h * 3600 + m * 60 + s;
 }
 
-function wrapLine(text: string, maxChars = 40): string[] {
+function wrapLine(text: string, maxChars = 28): string[] {
     const words = text.split(" ");
     const lines: string[] = [];
     let cur = "";
@@ -78,7 +83,8 @@ function parseVtt(vtt: string): Cue[] {
 // ─── VideoPlayer ──────────────────────────────────────────────────────────────
 
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
-function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, captionStyle = "default", subtitlePosition = "bottom" }, ref) {
+function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, captionStyle = "default", subtitlePosition = "bottom", subtitleYPercent }, ref) {
+    const containerRef = useRef<HTMLDivElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const cuesRef = useRef<Cue[]>([]);
@@ -97,8 +103,14 @@ function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, c
     }));
 
     useEffect(() => { cuesRef.current = parseVtt(vttContent); }, [vttContent]);
-
     useEffect(() => { subtitlesEnabledRef.current = subtitlesEnabled; }, [subtitlesEnabled]);
+
+    // Resolve the Y position (as fraction 0..1) from the two possible prop sources
+    // subtitleYPercent takes priority over subtitlePosition
+    // "top" uses 0.20 so multi-line subtitles never clip off the top edge
+    const resolvedYFraction = subtitleYPercent != null
+        ? subtitleYPercent / 100
+        : subtitlePosition === "top" ? 0.20 : 0.88;
 
     const drawFrame = useCallback((currentTime: number) => {
         const canvas = canvasRef.current;
@@ -107,11 +119,12 @@ function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, c
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        // Sync canvas size to rendered video size
+        // Sync canvas to the RENDERED video rect inside the container.
+        // In fullscreen the container fills the screen so this rect is correct.
         const rect = video.getBoundingClientRect();
-        if (canvas.width !== rect.width || canvas.height !== rect.height) {
-            canvas.width  = rect.width;
-            canvas.height = rect.height;
+        if (canvas.width !== Math.round(rect.width) || canvas.height !== Math.round(rect.height)) {
+            canvas.width  = Math.round(rect.width);
+            canvas.height = Math.round(rect.height);
         }
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -120,31 +133,56 @@ function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, c
         const cue = cuesRef.current.find(c => currentTime >= c.start && currentTime <= c.end);
         if (!cue || cue.lines.length === 0) return;
 
-        // Match burnSubtitlesWasm: fontsize on native video height
-        const nativeHeight = video.videoHeight || canvas.height;
-        const scale = canvas.height / nativeHeight;
-        const fontSize = Math.max(10, Math.round(subtitleFontBase * scale));
+        // Font size: 3% of rendered canvas height, clamped 13–34px.
+        // Intentionally slightly smaller than the burn formula so preview
+        // text doesn't dominate the player UI on larger screens.
+        const fontSize = Math.min(34, Math.max(13, Math.round(canvas.height * 0.030)));
 
-        ctx.font = ` ${fontSize}px Arial, sans-serif`;
+        ctx.font = `${fontSize}px Arial, sans-serif`;
         ctx.textBaseline = "bottom";
         ctx.textAlign = "center";
 
-        const lineHeight = fontSize * 1.25;
-        const padding = Math.max(6, Math.round(10 * scale));
-        const edgeOffset = Math.max(20, Math.round(80 * scale));
+        // Dynamically re-wrap any line that exceeds 88% of canvas width at the
+        // current font size — prevents overflow on small/mobile screens.
+        const maxLineWidth = canvas.width * 0.88;
+        const fittedLines: string[] = [];
+        for (const rawLine of cue.lines) {
+            if (ctx.measureText(rawLine).width <= maxLineWidth) {
+                fittedLines.push(rawLine);
+            } else {
+                const words = rawLine.split(" ");
+                let cur = "";
+                for (const w of words) {
+                    const test = cur ? `${cur} ${w}` : w;
+                    if (ctx.measureText(test).width <= maxLineWidth) {
+                        cur = test;
+                    } else {
+                        if (cur) fittedLines.push(cur);
+                        cur = w;
+                    }
+                }
+                if (cur) fittedLines.push(cur);
+            }
+        }
+        const lines = fittedLines.length > 0 ? fittedLines : cue.lines;
 
-        // Compute block bottom position based on subtitlePosition
-        const blockBottom = subtitlePosition === "top"
-            ? edgeOffset + cue.lines.length * lineHeight + padding * 2
-            : canvas.height - edgeOffset;
+        const lineHeight = fontSize * 1.3;
+        const padding = Math.max(8, Math.round(fontSize * 0.4));
+        const totalH = lines.length * lineHeight;
+
+        // blockBottom = bottom edge of last text line.
+        // Clamped so text never overflows top or bottom of canvas.
+        const rawBottom = canvas.height * resolvedYFraction;
+        const blockBottom = Math.min(
+            canvas.height - padding,
+            Math.max(totalH + padding * 2, rawBottom)
+        );
 
         let maxWidth = 0;
-        for (const line of cue.lines) {
+        for (const line of lines) {
             const w = ctx.measureText(line).width;
             if (w > maxWidth) maxWidth = w;
         }
-
-        const totalH = cue.lines.length * lineHeight;
 
         if (captionStyle === "default") {
             ctx.fillStyle = "rgba(0,0,0,0.75)";
@@ -158,17 +196,18 @@ function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, c
         ctx.fillStyle = "white";
         if (captionStyle === "outline") {
             ctx.strokeStyle = "black";
-            ctx.lineWidth = Math.max(2, Math.round(3 * scale));
+            ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.1));
             ctx.lineJoin = "round";
         }
 
-        for (let i = 0; i < cue.lines.length; i++) {
-            const y = blockBottom - (cue.lines.length - 1 - i) * lineHeight;
-            if (captionStyle === "outline") ctx.strokeText(cue.lines[i], canvas.width / 2, y);
-            ctx.fillText(cue.lines[i], canvas.width / 2, y);
+        for (let i = 0; i < lines.length; i++) {
+            const y = blockBottom - (lines.length - 1 - i) * lineHeight;
+            if (captionStyle === "outline") ctx.strokeText(lines[i], canvas.width / 2, y);
+            ctx.fillText(lines[i], canvas.width / 2, y);
         }
-    }, [subtitleFontBase, captionStyle, subtitlePosition]);
+    }, [captionStyle, resolvedYFraction]);
 
+    // Redraw on timeupdate / end / pause
     useEffect(() => {
         const video = videoRef.current;
         if (!video) return;
@@ -193,13 +232,59 @@ function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, c
         };
     }, [drawFrame]);
 
+    // Redraw when subtitles toggled or props change
     useEffect(() => {
         const video = videoRef.current;
         if (video) drawFrame(video.currentTime);
     }, [subtitlesEnabled, drawFrame]);
 
+    // ResizeObserver: re-sync canvas on any container resize (fullscreen, window resize)
+    useEffect(() => {
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (!video || !canvas) return;
+        const ro = new ResizeObserver(() => {
+            // Force canvas size reset then redraw
+            canvas.width = 0;
+            canvas.height = 0;
+            drawFrame(video.currentTime);
+        });
+        ro.observe(video);
+        return () => ro.disconnect();
+    }, [drawFrame]);
+
+    // Intercept native video fullscreen and redirect it to our container
+    // so the canvas overlay stays visible in fullscreen mode.
+    useEffect(() => {
+        const container = containerRef.current;
+        const video = videoRef.current;
+        if (!container || !video) return;
+
+        const onFsChange = () => {
+            if (document.fullscreenElement === video) {
+                // Browser fullscreened the raw video — swap to container
+                document.exitFullscreen().then(() => {
+                    container.requestFullscreen().catch(() => {});
+                }).catch(() => {});
+            }
+        };
+
+        document.addEventListener("fullscreenchange", onFsChange);
+        document.addEventListener("webkitfullscreenchange", onFsChange);
+        return () => {
+            document.removeEventListener("fullscreenchange", onFsChange);
+            document.removeEventListener("webkitfullscreenchange", onFsChange);
+        };
+    }, []);
+
+    const enterFullscreen = useCallback(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        if (container.requestFullscreen) container.requestFullscreen().catch(() => {});
+    }, []);
+
     return (
-        <div className={cn("relative rounded-xl overflow-hidden bg-black group", className)}>
+        <div ref={containerRef} className={cn("relative rounded-xl overflow-hidden bg-black group", className)}>
             <video
                 ref={videoRef}
                 src={videoUrl}
@@ -207,14 +292,27 @@ function VideoPlayer({ videoUrl, vttContent, className, subtitleFontBase = 52, c
                 className="w-full h-full max-h-[80vh] object-contain"
             />
 
-            {/* Canvas overlay — draws subtitles matching the burn style */}
+            {/* Canvas overlay — draws subtitles; sits above video, below controls */}
             <canvas
                 ref={canvasRef}
                 className="absolute inset-0 w-full h-full pointer-events-none"
                 style={{ maxHeight: "80vh" }}
             />
 
-            {/* Toggle button */}
+            {/* Container-level fullscreen button (keeps canvas visible) */}
+            <button
+                onClick={enterFullscreen}
+                title="Fullscreen (with subtitles)"
+                className={cn(
+                    "absolute bottom-14 right-3 p-2 rounded-lg text-sm font-medium transition-all z-10",
+                    "opacity-0 group-hover:opacity-100",
+                    "bg-black/60 text-white/70 hover:text-white"
+                )}
+            >
+                <Maximize2Icon className="size-4" />
+            </button>
+
+            {/* Subtitle toggle button */}
             <button
                 onClick={() => setSubtitlesEnabled(prev => !prev)}
                 title={subtitlesEnabled ? "Hide subtitles" : "Show subtitles"}

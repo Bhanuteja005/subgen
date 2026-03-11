@@ -685,19 +685,19 @@ const Hero = () => {
                         <div className="absolute top-1/4 left-1/2 -z-10 w-4/5 h-1/3 -translate-x-1/2 -translate-y-1/2 bg-primary/20 blur-[10rem] opacity-50" />
 
                         <div className="rounded-lg md:rounded-[24px] border border-foreground/10 bg-background overflow-hidden">
-                            {/* Static dashboard preview image */}
-                            <Image
-                                src="/images/dashboard.jpg"
-                                alt="Tenglish Captions — Dashboard Preview"
-                                width={2896}
-                                height={1804}
-                                priority
-                                className="w-full h-auto"
+                            {/* Looping hero video */}
+                            <video
+                                src="/images/hero-video.mp4"
+                                autoPlay
+                                muted
+                                loop
+                                playsInline
+                                className="w-full h-auto object-cover"
                             />
 
                             {/*
                              * Interactive upload widget — commented out for now.
-                             * Remove the Image above and un-comment this block to re-enable
+                             * Remove the video above and un-comment this block to re-enable
                              * the full hero upload + subtitle-editor experience.
                              *
                              * <div
