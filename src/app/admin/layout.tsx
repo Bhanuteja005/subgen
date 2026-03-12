@@ -11,14 +11,16 @@ import {
     Loader2Icon,
     ShieldAlertIcon,
     LayoutDashboardIcon,
+    MessageSquareIcon
 } from "lucide-react";
 import Icons from "@/components/global/icons";
 import { cn } from "@/utils";
 
 const navItems = [
-    { href: "/admin",         label: "Admin Dashboard", icon: LayoutDashboardIcon },
-    { href: "/admin/users",   label: "Users",           icon: UsersIcon },
-    { href: "/admin/videos",  label: "Videos",          icon: FilmIcon },
+    { href: "/admin",           label: "Admin Dashboard", icon: LayoutDashboardIcon },
+    { href: "/admin/users",     label: "Users",           icon: UsersIcon },
+    { href: "/admin/videos",    label: "Videos",          icon: FilmIcon },
+    { href: "/admin/feedback",  label: "Feedback",        icon: MessageSquareIcon },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
