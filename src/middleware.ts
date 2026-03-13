@@ -36,7 +36,16 @@ export async function middleware(req: NextRequest) {
             if (resp.ok) {
                 const data = await resp.json();
                 isLoggedIn = !!data?.user;
-                isAdmin = data?.user?.role === "admin";
+
+                // Some deployments may not set a role on the session object.
+                // Fall back to a safe known-admin email list when role is missing.
+                const email = (data?.user?.email ?? "").toString().toLowerCase();
+                const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS ?? "admin@subgen.com")
+                    .split(",")
+                    .map(e => e.trim().toLowerCase())
+                    .filter(Boolean);
+
+                isAdmin = data?.user?.role === "admin" || (email && adminEmails.includes(email));
             } else {
                 isLoggedIn = false;
             }
