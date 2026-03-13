@@ -61,8 +61,8 @@ function fmtDuration(sec: number) {
     return `${m}m ${s}s`;
 }
 
-// ≈ $1/MTok blended (Gemini pro), at ₹85 per USD
-const INR_PER_TOKEN = 0.000085;
+// ≈ $4.50/1M tokens blended (Gemini 3.1 Pro Preview). Using ₹85 per USD, that’s ~₹382.50/1M.
+const INR_PER_TOKEN = 0.0003825;
 
 function tokenCostINR(tokens: number): string {
     if (!tokens) return "₹0.00";
